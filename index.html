@@ -357,11 +357,19 @@ body.keyboard-open .tabbar{ display:none; }
 .ach-name{font-size:11px; font-weight:700; line-height:1.3;}
 
 /* Vocab */
-.vocab-row{padding:14px; border-bottom:1px solid var(--separator);}
+.vocab-row{padding:16px; border-bottom:1px solid var(--separator);}
 .vocab-row:last-child{border-bottom:none;}
-.vocab-term{font-size:17px; font-weight:700;}
-.vocab-def{font-size:14px; color:var(--text-secondary); margin-top:3px; line-height:1.4;}
-.vocab-translate{margin-top:8px; font-size:14px; color:var(--accent); font-weight:600; background:var(--accent-soft); display:inline-block; padding:6px 10px; border-radius:8px;}
+.vocab-header-row{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+.vocab-term{font-size:17px; font-weight:700; line-height:1.3;}
+.vocab-term-tr{font-weight:500; color:var(--text-secondary);}
+.vocab-translate-btn{
+  flex-shrink:0; font-size:12px; font-weight:700; color:var(--accent); background:var(--accent-soft);
+  border:none; padding:7px 12px; border-radius:20px; white-space:nowrap; margin-top:1px;
+}
+.vocab-phonetic{font-size:13px; color:var(--text-secondary); margin-top:4px; font-style:italic;}
+.vocab-def{font-size:14px; color:var(--text); margin-top:9px; line-height:1.45;}
+.vocab-example{font-size:13px; color:var(--text-secondary); margin-top:7px; font-style:italic;}
+.category-chip-picker{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;}
 
 /* Result circle */
 .result-circle-wrap{display:flex; justify-content:center; margin:10px 0 18px;}
@@ -521,6 +529,9 @@ function mdLite(text){
 }
 function topicById(id){ return DATA.topics.find(t=>t.id===id); }
 function exById(id){ return DATA.exercises.find(e=>e.id===id); }
+function vocabCategories(){
+  return Array.from(new Set(DATA.vocabulary.map(v=>v.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'es'));
+}
 function getProgress(exId){
   return DATA.progress[exId] || {attempts:0, correct:0, incorrect:0, box:0, lastSeen:null};
 }
@@ -689,7 +700,16 @@ function recordAnswer(ex, isCorrect){
 }
 
 /* ======================= ANSWER CHECKING ======================= */
-function normalizeStr(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function normalizeStr(s){
+  return String(s||'')
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?,;:]+$/g, '')
+    .trim();
+}
 function checkAnswer(ex, userInput){
   if(ex.type==='multiple_choice'){
     return Number(userInput) === Number(ex.correctIndex);
@@ -726,8 +746,9 @@ let state = {
   studyTopicId: null,
   contentTab: 'topics',
   contentFilterTopic: 'all',
-  vocabFilterTopic: 'all',
+  vocabFilterCategory: 'all',
   vocabSearch: '',
+  vocabTranslateShown: {},
   practice: null,   // {pool, current, sessionCorrect, sessionTotal, topicFilterId, lastId}
   exam: null,       // {questions, index, answers, startTime, config}
   examResult: null
@@ -877,8 +898,7 @@ function renderStudyList(){
   html += DATA.topics.map(t=>{
     const a = topicAccuracy(t.id);
     const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
-    const vocCount = DATA.vocabulary.filter(v=>v.topicId===t.id).length;
-    return '<button class="list-row" data-study-topic="'+t.id+'"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+exCount+' ejercicios · '+vocCount+' palabras</div></div><span class="badge '+accBadgeClass(a.pct)+'">'+(a.pct===null?'Nuevo':a.pct+'%')+'</span><span class="chev">'+icon('chevright',18)+'</span></button>';
+    return '<button class="list-row" data-study-topic="'+t.id+'"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+exCount+' ejercicios</div></div><span class="badge '+accBadgeClass(a.pct)+'">'+(a.pct===null?'Nuevo':a.pct+'%')+'</span><span class="chev">'+icon('chevright',18)+'</span></button>';
   }).join('');
   html += '</div>';
   return html;
@@ -886,7 +906,6 @@ function renderStudyList(){
 function renderStudyTopic(){
   const t = topicById(state.studyTopicId);
   if(!t){ state.studyTopicId=null; return renderStudyList(); }
-  const voc = DATA.vocabulary.filter(v=>v.topicId===t.id);
   const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
   let html = '<button class="back-btn" data-action="study-back">'+icon('chevleft',26)+'<span>Temas</span></button>';
   html += '<div class="title1" style="margin-bottom:12px;">'+escapeHtml(t.name)+'</div>';
@@ -894,11 +913,6 @@ function renderStudyTopic(){
     html += '<div class="card body-text">'+mdLite(t.grammarNotes)+'</div>';
   } else {
     html += '<div class="card footnote">Aún no hay apuntes de gramática para este tema. Añádelos desde Gestionar Contenido.</div>';
-  }
-  if(voc.length){
-    html += '<div class="section-label">Vocabulario del tema</div><div class="list">';
-    html += voc.map(v=>'<div class="vocab-row"><div class="vocab-term">'+escapeHtml(v.term)+'</div><div class="vocab-def">'+escapeHtml(v.definitionEn)+'</div><button class="vocab-translate" data-toggle-tr="'+v.id+'">Ver traducción</button><div class="footnote" style="margin-top:6px; display:none;" id="tr-'+v.id+'">'+escapeHtml(v.translationEs)+'</div></div>').join('');
-    html += '</div>';
   }
   if(exCount>0){
     html += '<button class="btn btn-primary" data-practice-topic="'+t.id+'">'+icon('dumbbell',18)+' Practicar este tema ('+exCount+')</button>';
@@ -1079,21 +1093,31 @@ function renderExerciseRunner(mode){
 
 /* ======================= VOCAB ======================= */
 function renderVocab(){
+  const categories = vocabCategories();
   let html = '<input type="text" class="input" id="vocab-search" placeholder="Buscar palabra..." value="'+escapeHtml(state.vocabSearch)+'" style="margin-bottom:10px;">';
-  if(DATA.topics.length){
-    html += '<div class="chip-row" id="vocab-topic-chips"><button class="chip '+(state.vocabFilterTopic==='all'?'active':'')+'" data-vtopic="all">Todos</button>';
-    html += DATA.topics.map(t=>'<button class="chip '+(state.vocabFilterTopic===t.id?'active':'')+'" data-vtopic="'+t.id+'">'+escapeHtml(t.name)+'</button>').join('');
+  if(categories.length){
+    html += '<div class="chip-row" id="vocab-category-chips"><button class="chip '+(state.vocabFilterCategory==='all'?'active':'')+'" data-vcategory="all">Todas</button>';
+    html += categories.map(c=>'<button class="chip '+(state.vocabFilterCategory===c?'active':'')+'" data-vcategory="'+escapeHtml(c)+'">'+escapeHtml(c)+'</button>').join('');
     html += '</div>';
   }
   let list = DATA.vocabulary.slice();
-  if(state.vocabFilterTopic!=='all') list = list.filter(v=>v.topicId===state.vocabFilterTopic);
+  if(state.vocabFilterCategory!=='all') list = list.filter(v=>v.category===state.vocabFilterCategory);
   if(state.vocabSearch.trim()) list = list.filter(v=> v.term.toLowerCase().includes(state.vocabSearch.trim().toLowerCase()));
 
   if(list.length===0){
     html += '<div class="empty-state"><div class="es-icon">🗂️</div><h3 class="title3">Sin resultados</h3><p>No hay vocabulario que coincida. Puedes añadir palabras nuevas desde Gestionar Contenido.</p></div>';
   } else {
     html += '<div class="list">' + list.map(v=>{
-      return '<div class="vocab-row"><div class="vocab-term">'+escapeHtml(v.term)+'</div><div class="vocab-def">'+escapeHtml(v.definitionEn)+'</div>'+(v.example?'<div class="footnote" style="margin-top:4px; font-style:italic;">"'+escapeHtml(v.example)+'"</div>':'')+'<button class="vocab-translate" data-toggle-tr="'+v.id+'">Ver traducción</button><div class="footnote" style="margin-top:6px; display:none;" id="tr-'+v.id+'">'+escapeHtml(v.translationEs)+'</div></div>';
+      const showingTr = !!state.vocabTranslateShown[v.id];
+      const descText = showingTr ? (v.descriptionEs || 'Sin traducción disponible') : (v.description||'');
+      const btnLabel = showingTr ? 'Mostrar original' : 'Ver traducción';
+      return '<div class="vocab-row">' +
+        '<div class="vocab-header-row"><div class="vocab-term">'+escapeHtml(v.term)+(v.translationEs?' <span class="vocab-term-tr">('+escapeHtml(v.translationEs)+')</span>':'')+'</div>' +
+        '<button class="vocab-translate-btn" data-toggle-desc="'+v.id+'">'+btnLabel+'</button></div>' +
+        (v.phonetic?'<div class="vocab-phonetic">'+escapeHtml(v.phonetic)+'</div>':'') +
+        '<div class="vocab-def">'+escapeHtml(descText)+'</div>' +
+        (v.example?'<div class="vocab-example">"'+escapeHtml(v.example)+'"</div>':'') +
+        '</div>';
     }).join('') + '</div>';
   }
   html += '<button class="fab" data-action="add-vocab">'+icon('plus',26)+'</button>';
@@ -1138,11 +1162,10 @@ function renderContent(){
 
   else if(state.contentTab==='vocab'){
     if(DATA.vocabulary.length===0){
-      html += '<div class="empty-state"><div class="es-icon">🔤</div><h3 class="title3">Sin vocabulario</h3><p>Añade palabras con su definición en inglés y su traducción.</p></div>';
+      html += '<div class="empty-state"><div class="es-icon">🔤</div><h3 class="title3">Sin vocabulario</h3><p>Añade palabras con su categoría, definición y traducción.</p></div>';
     } else {
       html += '<div class="list">' + DATA.vocabulary.map(v=>{
-        const t = topicById(v.topicId);
-        return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(v.term)+'</div><div class="lr-sub">'+escapeHtml(t?t.name:'Sin tema')+'</div></div><div class="lr-icons"><button class="icon-btn" data-edit-voc="'+v.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-voc="'+v.id+'">'+icon('trash',16)+'</button></div></div>';
+        return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(v.term)+'</div><div class="lr-sub">'+escapeHtml(v.category||'Sin categoría')+'</div></div><div class="lr-icons"><button class="icon-btn" data-edit-voc="'+v.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-voc="'+v.id+'">'+icon('trash',16)+'</button></div></div>';
       }).join('') + '</div>';
     }
     html += '<button class="fab" data-action="add-vocab">'+icon('plus',26)+'</button>';
@@ -1277,14 +1300,24 @@ function wireRemoveOptButtons(){
 }
 function openVocabModal(id){
   const v = id ? DATA.vocabulary.find(x=>x.id===id) : null;
+  const categories = vocabCategories();
   let html = modalHeader(v?'Editar palabra':'Nueva palabra');
-  html += '<div class="field"><label>Término (inglés)</label><input type="text" class="input" id="m-voc-term" value="'+(v?escapeHtml(v.term):'')+'" placeholder="apple"></div>';
-  html += '<div class="field"><label>Definición (en inglés)</label><textarea class="textarea" id="m-voc-def" placeholder="A round fruit with red or green skin">'+(v?escapeHtml(v.definitionEn):'')+'</textarea></div>';
-  html += '<div class="field"><label>Traducción (español)</label><input type="text" class="input" id="m-voc-tr" value="'+(v?escapeHtml(v.translationEs):'')+'" placeholder="manzana"></div>';
-  html += '<div class="field"><label>Ejemplo (opcional)</label><input type="text" class="input" id="m-voc-ex" value="'+(v?escapeHtml(v.example||''):'')+'" placeholder="I eat an apple every day."></div>';
-  html += '<div class="field"><label>Tema (opcional)</label><select class="select" id="m-voc-topic"><option value="">Ninguno</option>' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(v&&v.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
+  html += '<div class="field"><label>Término (inglés)</label><input type="text" class="input" id="m-voc-term" value="'+(v?escapeHtml(v.term):'')+'" placeholder="smartwatch"></div>';
+  html += '<div class="field"><label>Traducción de la palabra (español)</label><input type="text" class="input" id="m-voc-tr" value="'+(v?escapeHtml(v.translationEs||''):'')+'" placeholder="reloj inteligente"></div>';
+  html += '<div class="field"><label>Transcripción fonética (opcional)</label><input type="text" class="input" id="m-voc-phonetic" value="'+(v?escapeHtml(v.phonetic||''):'')+'" placeholder="/ˈsmɔːrtwɒtʃ/"></div>';
+  html += '<div class="field"><label>Categoría</label><input type="text" class="input" id="m-voc-category" value="'+(v?escapeHtml(v.category||''):'')+'" placeholder="Ej: Dispositivos electrónicos">';
+  if(categories.length){
+    html += '<div class="category-chip-picker" id="voc-category-chips">' + categories.map(c=>'<button type="button" class="chip" data-fillcategory="'+escapeHtml(c)+'">'+escapeHtml(c)+'</button>').join('') + '</div>';
+  }
+  html += '<div class="hint-text">Elige una categoría existente tocando un chip o escribe una nueva.</div></div>';
+  html += '<div class="field"><label>Descripción (inglés)</label><textarea class="textarea" id="m-voc-def" placeholder="A wearable electronic device worn on the wrist">'+(v?escapeHtml(v.description||v.definitionEn||''):'')+'</textarea></div>';
+  html += '<div class="field"><label>Traducción de la descripción (español)</label><textarea class="textarea" id="m-voc-def-es" placeholder="Un dispositivo electrónico que se lleva en la muñeca">'+(v?escapeHtml(v.descriptionEs||''):'')+'</textarea></div>';
+  html += '<div class="field"><label>Ejemplo (opcional)</label><input type="text" class="input" id="m-voc-ex" value="'+(v?escapeHtml(v.example||''):'')+'" placeholder="I check the time on my smartwatch."></div>';
   html += '<button class="btn btn-primary" data-action="save-vocab" data-id="'+(v?v.id:'')+'">Guardar</button>';
   openModal(html);
+  document.querySelectorAll('[data-fillcategory]').forEach(chip=>{
+    chip.onclick = ()=>{ document.getElementById('m-voc-category').value = chip.getAttribute('data-fillcategory'); };
+  });
 }
 function openAchievementModal(id){
   const a = id ? DATA.achievements.find(x=>x.id===id) : null;
@@ -1325,18 +1358,26 @@ function showConfirm(message, confirmLabel, danger){
 
 /* ======================= EVENT WIRING ======================= */
 function afterRender(){
-  // vocab translation toggles
-  document.querySelectorAll('[data-toggle-tr]').forEach(btn=>{
+  // vocab: toggle description translation (word/description shown vs. Spanish translation)
+  document.querySelectorAll('[data-toggle-desc]').forEach(btn=>{
     btn.onclick = ()=>{
-      const id = btn.getAttribute('data-toggle-tr');
-      const el = document.getElementById('tr-'+id);
-      if(el) el.style.display = el.style.display==='none' ? 'block' : 'none';
+      const id = btn.getAttribute('data-toggle-desc');
+      state.vocabTranslateShown[id] = !state.vocabTranslateShown[id];
+      renderVocabOnly();
     };
   });
   // vocab search / filters
   const vsearch = document.getElementById('vocab-search');
-  if(vsearch){ vsearch.oninput = ()=>{ state.vocabSearch = vsearch.value; renderVocabOnly(); }; }
-  document.querySelectorAll('[data-vtopic]').forEach(c=>{ c.onclick=()=>{ state.vocabFilterTopic = c.getAttribute('data-vtopic'); render(); }; });
+  if(vsearch){
+    vsearch.oninput = ()=>{
+      const pos = vsearch.selectionStart;
+      state.vocabSearch = vsearch.value;
+      renderVocabOnly();
+      const newInput = document.getElementById('vocab-search');
+      if(newInput){ newInput.focus(); try{ newInput.setSelectionRange(pos,pos); }catch(e){} }
+    };
+  }
+  document.querySelectorAll('[data-vcategory]').forEach(c=>{ c.onclick=()=>{ state.vocabFilterCategory = c.getAttribute('data-vcategory'); render(); }; });
   document.querySelectorAll('[data-ctopic]').forEach(c=>{ c.onclick=()=>{ state.contentFilterTopic = c.getAttribute('data-ctopic'); render(); }; });
 
   // study
@@ -1478,14 +1519,18 @@ function wireModalActions(){
   const saveVocBtn = document.querySelector('[data-action="save-vocab"]');
   if(saveVocBtn) saveVocBtn.onclick=()=>{
     const term = document.getElementById('m-voc-term').value.trim();
-    const def = document.getElementById('m-voc-def').value.trim();
-    if(!term || !def){ showToast('⚠️','Rellena término y definición',''); return; }
-    const tr = document.getElementById('m-voc-tr').value.trim();
+    const translationEs = document.getElementById('m-voc-tr').value.trim();
+    const category = document.getElementById('m-voc-category').value.trim();
+    const description = document.getElementById('m-voc-def').value.trim();
+    const descriptionEs = document.getElementById('m-voc-def-es').value.trim();
+    if(!term || !translationEs || !description || !descriptionEs){ showToast('⚠️','Rellena término, traducción y descripción (inglés y español)',''); return; }
+    if(!category){ showToast('⚠️','La categoría es obligatoria',''); return; }
+    const phonetic = document.getElementById('m-voc-phonetic').value.trim();
     const example = document.getElementById('m-voc-ex').value.trim();
-    const topicId = document.getElementById('m-voc-topic').value || null;
     const id = saveVocBtn.getAttribute('data-id');
-    if(id){ const v=DATA.vocabulary.find(x=>x.id===id); Object.assign(v, {term, definitionEn:def, translationEs:tr, example, topicId}); }
-    else { DATA.vocabulary.push({id:uid(), term, definitionEn:def, translationEs:tr, example, topicId, createdAt:Date.now()}); }
+    const payload = {term, translationEs, phonetic, category, description, descriptionEs, example};
+    if(id){ const v=DATA.vocabulary.find(x=>x.id===id); Object.assign(v, payload); }
+    else { DATA.vocabulary.push(Object.assign({id:uid(), createdAt:Date.now()}, payload)); }
     save(); closeModal(); render();
     showToast('✅', id?'Palabra actualizada':'Palabra añadida','');
   };
@@ -1511,7 +1556,6 @@ function wireModalActions(){
 
 function deleteTopic(id){
   DATA.exercises = DATA.exercises.filter(e=>e.topicId!==id);
-  DATA.vocabulary.forEach(v=>{ if(v.topicId===id) v.topicId=null; });
   DATA.achievements.forEach(a=>{ if(a.type==='topic_mastery' && a.topicId===id){ a.type='total_correct'; a.topicId=undefined; } });
   DATA.topics = DATA.topics.filter(t=>t.id!==id);
   save(); render();
