@@ -195,6 +195,13 @@ a{color:var(--accent); text-decoration:none;}
 .btn-secondary{background:var(--accent-soft); color:var(--accent);}
 .btn-danger{background:var(--danger-soft); color:var(--danger);}
 .btn-plain{background:none; color:var(--accent); font-weight:600; padding:10px;}
+.text-action-btn{
+  display:inline-flex; align-items:center; gap:4px; background:none; border:none;
+  color:var(--accent); font-size:14px; font-weight:600; padding:6px 9px; border-radius:8px; white-space:nowrap;
+}
+.text-action-btn:active{background:var(--bg-secondary);}
+.text-action-btn svg{width:15px; height:15px; flex-shrink:0;}
+.text-action-btn.danger{color:var(--danger);}
 .back-btn{
   display:inline-flex; align-items:center; gap:0px;
   background:none; border:none; color:var(--accent); font-size:17px; font-weight:400;
@@ -282,7 +289,14 @@ a{color:var(--accent); text-decoration:none;}
 .progress-fill{height:100%; background:var(--accent); border-radius:4px; transition:width .25s ease;}
 .session-meta{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
 .exercise-card{background:var(--card); border-radius:var(--radius-l); padding:20px; box-shadow:var(--shadow); margin-bottom:16px;}
-.ex-topic-tag{font-size:12px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:.03em; margin-bottom:8px;}
+.ex-topic-tag{font-size:12px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:.03em;}
+.ex-card-header{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:8px;}
+.help-btn{
+  flex-shrink:0; width:30px; height:30px; border-radius:15px; background:var(--bg-secondary);
+  display:flex; align-items:center; justify-content:center; color:var(--accent); border:none; margin-top:-4px;
+}
+.help-btn svg{width:18px; height:18px;}
+.help-btn:active{background:var(--accent-soft);}
 .ex-question{font-size:20px; font-weight:700; line-height:1.35; margin-bottom:4px;}
 .option-row{
   display:flex; align-items:center; gap:10px; width:100%; text-align:left;
@@ -319,12 +333,6 @@ a{color:var(--accent); text-decoration:none;}
 @media (min-width:900px){ .sticky-actions{bottom:0;} }
 body.keyboard-open .sticky-actions{ bottom:0; }
 body.keyboard-open .tabbar{ display:none; }
-
-.help-fab{
-  position:fixed; right:16px; z-index:23; bottom:calc(var(--tabbar-h) + var(--safe-b) + 96px);
-  width:44px; height:44px; border-radius:22px; background:var(--card); box-shadow:var(--shadow);
-  border:1px solid var(--separator); display:flex; align-items:center; justify-content:center; color:var(--accent); font-weight:800;
-}
 
 /* Modal / sheet */
 .overlay{position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:50; display:flex; align-items:flex-end; justify-content:center;}
@@ -1020,21 +1028,22 @@ function renderExerciseRunner(mode){
     return '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Nada más por aquí</h3><p>Añade más ejercicios para seguir practicando este tema.</p></div>';
   }
   const t = topicById(ex.topicId);
+  const answered = mode==='exam' ? (ctx.answers[ex.id] !== undefined) : ctx.answeredState;
   let html = '<div class="exercise-wrap">';
 
   if(mode==='exam'){
     const pct = Math.round(((ctx.index)/ctx.questions.length)*100);
-    html += '<div class="session-meta"><span class="footnote">Pregunta '+(ctx.index+1)+' de '+ctx.questions.length+'</span><button class="btn-plain" data-action="exam-finish-early" style="padding:4px 6px;">Terminar</button></div>';
+    html += '<div class="session-meta"><span class="footnote">Pregunta '+(ctx.index+1)+' de '+ctx.questions.length+'</span><button class="text-action-btn danger" data-action="exam-finish-early">'+icon('close',15)+' Terminar</button></div>';
     html += '<div class="progress-track"><div class="progress-fill" style="width:'+pct+'%;"></div></div>';
   } else {
-    html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="btn-plain" data-action="practice-stop" style="padding:4px 6px;">Terminar</button></div>';
+    html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="practice-stop">'+icon('close',15)+' Terminar</button></div>';
   }
 
   html += '<div class="exercise-card">';
-  html += '<div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(ex.type)+'</div>';
+  html += '<div class="ex-card-header"><div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(ex.type)+'</div>'+
+    (mode==='practice' && ex.hint && !answered ? '<button type="button" class="help-btn" data-action="show-hint">'+icon('help',18)+'</button>' : '')+
+    '</div>';
   html += '<div class="ex-question">'+escapeHtml(ex.prompt)+'</div>';
-
-  const answered = mode==='exam' ? (ctx.answers[ex.id] !== undefined) : ctx.answeredState;
 
   if(ex.type==='multiple_choice'){
     html += (ex.options||[]).map((opt,i)=>{
@@ -1083,10 +1092,6 @@ function renderExerciseRunner(mode){
     html += '</div>';
   }
   html += '</div>';
-
-  if(mode==='practice' && ex.hint && !answered){
-    html += '<button class="help-fab" data-action="show-hint">'+icon('help',22)+'</button>';
-  }
 
   return html;
 }
@@ -1255,7 +1260,7 @@ function renderExerciseTypeFields(type, e){
     const opts = (e&&e.options)||['','',''];
     let html = '<div class="field"><label>Opciones (marca la correcta)</label><div id="mc-options">';
     html += opts.map((o,i)=>'<div class="option-edit-row"><input type="radio" name="mc-correct" value="'+i+'" '+(e&&e.correctIndex===i?'checked':(!e&&i===0?'checked':''))+'><input type="text" class="input" data-mc-opt value="'+escapeHtml(o)+'" placeholder="Opción '+(i+1)+'"><button type="button" class="icon-btn danger" data-remove-opt>'+icon('close',14)+'</button></div>').join('');
-    html += '</div><button type="button" class="btn-plain" data-action="add-mc-opt" style="padding:6px 0;">'+icon('plus',14)+' Añadir opción</button></div>';
+    html += '</div><button type="button" class="text-action-btn" style="margin-top:2px;" data-action="add-mc-opt">'+icon('plus',15)+' Añadir opción</button></div>';
     return html;
   }
   if(type==='fill_blank' || type==='translation'){
@@ -1340,12 +1345,12 @@ function openAchievementModal(id){
 function openHintModal(hintText){
   openModal(modalHeader('Ayuda') + '<div class="body-text" style="padding-bottom:6px;">'+escapeHtml(hintText)+'</div>');
 }
-function showConfirm(message, confirmLabel, danger){
+function showConfirm(message, confirmLabel, danger, cancelLabel){
   return new Promise(resolve=>{
     const html = '<div class="sheet-handle"></div>' +
       '<div class="body-text" style="padding:8px 4px 20px; text-align:center;">'+escapeHtml(message)+'</div>' +
       '<div class="btn-block-row">' +
-        '<button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">Cancelar</button>' +
+        '<button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">'+escapeHtml(cancelLabel||'Cancelar')+'</button>' +
         '<button class="btn '+(danger?'btn-danger':'btn-primary')+'" id="confirm-ok-btn" style="flex:1;">'+escapeHtml(confirmLabel||'Confirmar')+'</button>' +
       '</div>';
     openModal(html);
@@ -1607,7 +1612,11 @@ function wireRunnerEvents(){
     const nextBtn = document.querySelector('[data-action="practice-next"]');
     if(nextBtn) nextBtn.onclick = ()=>nextPracticeExercise();
     const stopBtn = document.querySelector('[data-action="practice-stop"]');
-    if(stopBtn) stopBtn.onclick = ()=>{ state.practice=null; setScreen('home'); };
+    if(stopBtn) stopBtn.onclick = ()=>{
+      showConfirm('¿Seguro que quieres terminar?', 'Sí', true, 'No').then(ok=>{
+        if(ok){ state.practice=null; setScreen('home'); }
+      });
+    };
     const hintBtn = document.querySelector('[data-action="show-hint"]');
     if(hintBtn) hintBtn.onclick = ()=> openHintModal(ex.hint);
   }
