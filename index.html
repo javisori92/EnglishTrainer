@@ -707,21 +707,15 @@ function checkAnswer(ex, userInput){
 /* ======================= APP STATE / ROUTER ======================= */
 const TABS = [
   {id:'home', label:'Inicio', icon:'home'},
-  {id:'practice', label:'Práctica', icon:'dumbbell'},
-  {id:'exam', label:'Examen', icon:'exam'},
   {id:'study', label:'Estudio', icon:'book'},
-  {id:'more', label:'Más', icon:'more'}
-];
-const MORE_ITEMS = [
+  {id:'exam', label:'Examen', icon:'exam'},
   {id:'vocab', label:'Vocabulario', icon:'vocab'},
-  {id:'content', label:'Gestionar Contenido', icon:'content'},
-  {id:'settings', label:'Ajustes', icon:'settings'}
+  {id:'content', label:'Contenido', icon:'content'}
 ];
 const DESKTOP_ITEMS = [
   {id:'home', label:'Inicio', icon:'home'},
-  {id:'practice', label:'Práctica', icon:'dumbbell'},
-  {id:'exam', label:'Examen', icon:'exam'},
   {id:'study', label:'Estudio', icon:'book'},
+  {id:'exam', label:'Examen', icon:'exam'},
   {id:'vocab', label:'Vocabulario', icon:'vocab'},
   {id:'content', label:'Gestionar Contenido', icon:'content'},
   {id:'settings', label:'Ajustes', icon:'settings'}
@@ -740,7 +734,7 @@ let state = {
 };
 
 function setScreen(id){
-  if(id === state.screen && id!=='more') { return; }
+  if(id === state.screen) { return; }
   const examInProgress = state.exam && Object.keys(state.exam.answers||{}).length>0;
   if(examInProgress && id!=='exam'){
     showConfirm('Tienes un examen en curso. Si sales ahora perderás las respuestas de esta sesión.', 'Salir del examen', true).then(ok=>{
@@ -768,15 +762,10 @@ function applyTheme(){
   else document.documentElement.removeAttribute('data-theme');
 }
 
-function renderMore(){
-  return '<div class="list">' + MORE_ITEMS.map(it=>
-    '<button class="list-row" data-nav="'+it.id+'"><span class="icon-btn" style="background:none; color:var(--accent);">'+icon(it.icon,20)+'</span><div class="lr-main"><div class="lr-title">'+it.label+'</div></div><span class="chev">'+icon('chevright',18)+'</span></button>'
-  ).join('') + '</div>';
-}
 function renderTabbar(){
   const bar = document.getElementById('tabbar');
   bar.innerHTML = TABS.map(t=>{
-    const active = (t.id==='more') ? (state.screen==='more' || MORE_ITEMS.some(m=>m.id===state.screen)) : state.screen===t.id;
+    const active = state.screen===t.id;
     return '<button class="tab-item '+(active?'active':'')+'" data-nav="'+t.id+'">'+icon(t.icon,24)+'<span>'+t.label+'</span></button>';
   }).join('');
 }
@@ -786,7 +775,7 @@ function renderSidebar(){
     DESKTOP_ITEMS.map(t=>'<button class="side-item '+(state.screen===t.id?'active':'')+'" data-nav="'+t.id+'">'+icon(t.icon,20)+'<span>'+t.label+'</span></button>').join('');
 }
 function screenTitle(){
-  const map = {home:'Inicio', practice:'Práctica', exam:'Examen', study:'Estudio', vocab:'Vocabulario', content:'Gestionar Contenido', settings:'Ajustes', more:'Más'};
+  const map = {home:'Inicio', practice:'Práctica', exam:'Examen', study:'Estudio', vocab:'Vocabulario', content:'Contenido', settings:'Ajustes'};
   return map[state.screen] || '';
 }
 function renderTopbarActions(){
@@ -814,7 +803,6 @@ function render(){
     case 'vocab': html = renderVocab(); break;
     case 'content': html = renderContent(); break;
     case 'settings': html = renderSettings(); break;
-    case 'more': html = renderMore(); break;
     default: html = renderHome();
   }
   c.innerHTML = html;
@@ -845,7 +833,7 @@ function renderHome(){
   '</div>';
 
   if(hasContent){
-    html += '<button class="btn btn-primary" data-nav="practice" style="margin-bottom:6px;">'+icon('dumbbell',18)+' Continuar practicando</button>';
+    html += '<button class="btn btn-primary" data-action="practice-global" style="margin-bottom:6px;">'+icon('dumbbell',18)+' Continuar practicando</button>';
   }
 
   const unlocked = DATA.achievements.filter(a=>DATA.unlockedAchievementIds.includes(a.id));
@@ -881,7 +869,11 @@ function renderStudyList(){
   if(DATA.topics.length===0){
     return '<div class="empty-state"><div class="es-icon">📘</div><h3 class="title3">Aún no hay temas</h3><p>Crea tu primer tema en Gestionar Contenido para empezar a estudiar gramática y vocabulario.</p><button class="btn btn-primary" data-nav="content" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('plus',18)+' Crear tema</button></div>';
   }
-  let html = '<div class="list">';
+  let html = '';
+  if(DATA.exercises.length>0){
+    html += '<button class="btn btn-primary" data-action="practice-global" style="margin-bottom:14px;">'+icon('dumbbell',18)+' Práctica global</button>';
+  }
+  html += '<div class="list">';
   html += DATA.topics.map(t=>{
     const a = topicAccuracy(t.id);
     const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
@@ -916,18 +908,10 @@ function renderStudyTopic(){
 
 /* ======================= PRACTICE ======================= */
 function renderPractice(){
-  if(DATA.exercises.length===0){
-    return '<div class="empty-state"><div class="es-icon">🏋️</div><h3 class="title3">No hay ejercicios todavía</h3><p>Añade ejercicios en Gestionar Contenido para poder practicar. La app priorizará automáticamente lo que más falles.</p><button class="btn btn-primary" data-nav="content" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('plus',18)+' Añadir ejercicios</button></div>';
-  }
   if(!state.practice){
-    let html = '<div class="card"><div class="title3" style="margin-bottom:10px;">Configura tu sesión</div><div class="footnote" style="margin-bottom:10px;">Elige un tema para centrarte en él, o practica de forma adaptativa con todos.</div>';
-    html += '<div class="chip-row" id="practice-topic-chips">';
-    html += '<button class="chip active" data-ptopic="all">Adaptativo (todos)</button>';
-    html += DATA.topics.filter(t=>DATA.exercises.some(e=>e.topicId===t.id)).map(t=>'<button class="chip" data-ptopic="'+t.id+'">'+escapeHtml(t.name)+'</button>').join('');
-    html += '</div>';
-    html += '<button class="btn btn-primary" data-action="start-practice">'+icon('dumbbell',18)+' Empezar práctica</button></div>';
-    html += '<div class="card footnote">La app usa tus aciertos y fallos para decidir qué preguntarte: repasa más lo que fallas y menos lo que ya dominas, con repaso espaciado.</div>';
-    return html;
+    // La práctica siempre se inicia desde Estudio (Práctica global o Practicar este tema);
+    // esta pantalla solo debería verse mientras hay una sesión activa.
+    return '<div class="empty-state"><div class="es-icon">🏋️</div><h3 class="title3">No hay ninguna sesión activa</h3><p>Inicia una práctica desde Estudio, con "Práctica global" o "Practicar este tema" dentro de un tema.</p><button class="btn btn-primary" data-nav="study" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('book',18)+' Ir a Estudio</button></div>';
   }
   return renderExerciseRunner('practice');
 }
@@ -1358,21 +1342,8 @@ function afterRender(){
   // study
   document.querySelectorAll('[data-study-topic]').forEach(r=>{ r.onclick=()=>{ state.studyTopicId = r.getAttribute('data-study-topic'); render(); }; });
   const back = document.querySelector('[data-action="study-back"]'); if(back) back.onclick=()=>{ state.studyTopicId=null; render(); };
-  document.querySelectorAll('[data-practice-topic]').forEach(btn=>{ btn.onclick=()=>{ startPractice(btn.getAttribute('data-practice-topic')); }; });
-
-  // practice topic chips (setup)
-  document.querySelectorAll('[data-ptopic]').forEach(chip=>{
-    chip.onclick = ()=>{
-      document.querySelectorAll('[data-ptopic]').forEach(c=>c.classList.remove('active'));
-      chip.classList.add('active');
-      chip.dataset.selected='1';
-    };
-  });
-  const startPracticeBtn = document.querySelector('[data-action="start-practice"]');
-  if(startPracticeBtn) startPracticeBtn.onclick = ()=>{
-    const active = document.querySelector('[data-ptopic].active');
-    startPractice(active ? active.getAttribute('data-ptopic') : 'all');
-  };
+  document.querySelectorAll('[data-practice-topic]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession(btn.getAttribute('data-practice-topic')); }; });
+  const practiceGlobalBtn = document.querySelector('[data-action="practice-global"]'); if(practiceGlobalBtn) practiceGlobalBtn.onclick=()=>{ startPracticeSession('all'); };
 
   // exam setup
   document.querySelectorAll('[data-ecount]').forEach(chip=>{
@@ -1445,7 +1416,7 @@ function afterRender(){
     missedIds.forEach(id=>{ const p=DATA.progress[id]; if(p){ p.box=0; p.lastSeen=null; } });
     save();
     state.examResult=null;
-    setScreen('practice');
+    startPracticeSession('all');
   };
 
   // modal generic
@@ -1556,6 +1527,13 @@ function startPractice(topicId){
   const first = pickAdaptiveExercise(pool, null);
   state.practice = {pool, topicFilterId:topicId, current:first, answeredState:false, selected:null, textValue:'', lastCorrect:false, sessionCorrect:0, sessionTotal:0};
   render();
+}
+// Arranca una sesión de práctica desde cualquier pantalla (p.ej. Estudio), cambiando
+// primero a la pantalla de Práctica para que startPractice() la renderice correctamente.
+function startPracticeSession(topicId){
+  state.screen = 'practice';
+  startPractice(topicId);
+  window.scrollTo(0,0);
 }
 function wireRunnerEvents(){
   if(state.screen==='practice' && state.practice){
