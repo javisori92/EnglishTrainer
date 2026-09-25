@@ -338,13 +338,16 @@ body.keyboard-open .tabbar{ display:none; }
 .overlay{position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:50; display:flex; align-items:flex-end; justify-content:center;}
 @media (min-width:640px){ .overlay{align-items:center;} }
 .sheet{
-  background:var(--bg); width:100%; max-width:560px; max-height:92dvh; overflow-y:auto;
-  border-radius:20px 20px 0 0; padding:14px 18px calc(24px + var(--safe-b));
-  box-shadow:0 -8px 30px rgba(0,0,0,.2);
+  background:var(--bg); width:100%; max-width:560px; max-height:92dvh;
+  border-radius:20px 20px 0 0; box-shadow:0 -8px 30px rgba(0,0,0,.2); overscroll-behavior:contain;
+  display:flex; flex-direction:column; overflow:hidden;
 }
 @media (min-width:640px){ .sheet{border-radius:20px; max-height:88dvh; margin-bottom:5vh;} }
 .sheet-handle{width:36px; height:5px; background:var(--separator); border-radius:3px; margin:4px auto 14px;}
-.sheet-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+.sheet-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:2px;}
+.sheet-top{flex-shrink:0; padding:14px 18px 0;}
+.sheet-scroll{flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; padding:14px 18px calc(18px + var(--safe-b));}
+.sheet-footer{flex-shrink:0; padding:12px 18px calc(14px + var(--safe-b)); border-top:1px solid var(--separator); background:var(--bg);}
 
 /* Toast */
 #toast-host{position:fixed; top:calc(var(--safe-t) + 10px); left:0; right:0; z-index:80; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
@@ -1211,18 +1214,51 @@ function renderSettings(){
 }
 
 /* ======================= MODALS ======================= */
-function openModal(innerHtml){
+function openModal(headerHtml, bodyHtml, footerHtml){
   const host = document.getElementById('modal-host');
-  host.innerHTML = '<div class="overlay" id="overlay"><div class="sheet">'+innerHtml+'</div></div>';
+  host.innerHTML = '<div class="overlay" id="overlay"><div class="sheet">' +
+    (headerHtml ? '<div class="sheet-top">'+headerHtml+'</div>' : '') +
+    '<div class="sheet-scroll">'+bodyHtml+'</div>' +
+    (footerHtml ? '<div class="sheet-footer">'+footerHtml+'</div>' : '') +
+    '</div></div>';
   document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
   document.querySelectorAll('[data-action="close-modal"]').forEach(b=>{ b.onclick=closeModal; });
   wireModalActions();
+  lockBodyScroll();
 }
 function closeModal(){
   document.getElementById('modal-host').innerHTML='';
   if(modalOnDismiss){ const cb=modalOnDismiss; modalOnDismiss=null; cb(); }
+  unlockBodyScroll();
 }
 let modalOnDismiss = null;
+
+// Bloqueo de scroll del fondo (para el overlay de los modales/diales y mientras el teclado
+// está abierto). Usa un contador para que ambos motivos puedan solaparse sin desincronizarse.
+let scrollLockDepth = 0;
+let scrollLockSavedY = 0;
+function lockBodyScroll(){
+  if(scrollLockDepth === 0){
+    scrollLockSavedY = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position = 'fixed';
+    document.body.style.top = (-scrollLockSavedY) + 'px';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+  }
+  scrollLockDepth++;
+}
+function unlockBodyScroll(){
+  scrollLockDepth = Math.max(0, scrollLockDepth - 1);
+  if(scrollLockDepth === 0){
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    window.scrollTo(0, scrollLockSavedY);
+  }
+}
 
 function modalHeader(title){
   return '<div class="sheet-handle"></div><div class="sheet-header"><div class="title3">'+escapeHtml(title)+'</div><button class="icon-btn" data-action="close-modal">'+icon('close',16)+'</button></div>';
@@ -1230,25 +1266,26 @@ function modalHeader(title){
 
 function openTopicModal(id){
   const t = id ? topicById(id) : null;
-  const html = modalHeader(t?'Editar tema':'Nuevo tema') +
+  const header = modalHeader(t?'Editar tema':'Nuevo tema');
+  const body =
     '<div class="field"><label>Nombre del tema</label><input type="text" class="input" id="m-topic-name" placeholder="Presente Simple" value="'+(t?escapeHtml(t.name):'')+'"></div>' +
-    '<div class="field"><label>Apuntes de gramática (opcional)</label><textarea class="textarea" id="m-topic-notes" placeholder="Explica la regla, ejemplos, usa **negrita** o líneas con - para listas...">'+(t?escapeHtml(t.grammarNotes||''):'')+'</textarea></div>' +
-    '<button class="btn btn-primary" data-action="save-topic" data-id="'+(t?t.id:'')+'">Guardar</button>';
-  openModal(html);
+    '<div class="field"><label>Apuntes de gramática (opcional)</label><textarea class="textarea" id="m-topic-notes" placeholder="Explica la regla, ejemplos, usa **negrita** o líneas con - para listas...">'+(t?escapeHtml(t.grammarNotes||''):'')+'</textarea></div>';
+  const footer = '<button class="btn btn-primary" data-action="save-topic" data-id="'+(t?t.id:'')+'">Guardar</button>';
+  openModal(header, body, footer);
 }
 function openExerciseModal(id){
   const e = id ? exById(id) : null;
   const type = e ? e.type : 'multiple_choice';
-  let html = modalHeader(e?'Editar ejercicio':'Nuevo ejercicio');
-  html += '<div class="field"><label>Tema</label><select class="select" id="m-ex-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(e&&e.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
-  html += '<div class="field"><label>Tipo de ejercicio</label><select class="select" id="m-ex-type">' +
+  const header = modalHeader(e?'Editar ejercicio':'Nuevo ejercicio');
+  let body = '<div class="field"><label>Tema</label><select class="select" id="m-ex-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(e&&e.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
+  body += '<div class="field"><label>Tipo de ejercicio</label><select class="select" id="m-ex-type">' +
     ['multiple_choice','fill_blank','true_false','translation'].map(tp=>'<option value="'+tp+'" '+(type===tp?'selected':'')+'>'+typeLabel(tp)+'</option>').join('') + '</select></div>';
-  html += '<div class="field"><label>Enunciado</label><textarea class="textarea" id="m-ex-prompt" placeholder="Ej: She ___ to school every day. (go)">'+(e?escapeHtml(e.prompt):'')+'</textarea><div class="hint-text">Para rellenar hueco usa ___ donde va la respuesta.</div></div>';
-  html += '<div id="m-ex-type-fields">' + renderExerciseTypeFields(type, e) + '</div>';
-  html += '<div class="field"><label>Pista (opcional)</label><input type="text" class="input" id="m-ex-hint" value="'+(e?escapeHtml(e.hint||''):'')+'" placeholder="Consejo para resolverlo"></div>';
-  html += '<div class="field"><label>Explicación (se muestra tras responder)</label><textarea class="textarea" id="m-ex-explanation" placeholder="Por qué es correcta esta respuesta...">'+(e?escapeHtml(e.explanation||''):'')+'</textarea></div>';
-  html += '<button class="btn btn-primary" data-action="save-exercise" data-id="'+(e?e.id:'')+'">Guardar</button>';
-  openModal(html);
+  body += '<div class="field"><label>Enunciado</label><textarea class="textarea" id="m-ex-prompt" placeholder="Ej: She ___ to school every day. (go)">'+(e?escapeHtml(e.prompt):'')+'</textarea><div class="hint-text">Para rellenar hueco usa ___ donde va la respuesta.</div></div>';
+  body += '<div id="m-ex-type-fields">' + renderExerciseTypeFields(type, e) + '</div>';
+  body += '<div class="field"><label>Pista (opcional)</label><input type="text" class="input" id="m-ex-hint" value="'+(e?escapeHtml(e.hint||''):'')+'" placeholder="Consejo para resolverlo"></div>';
+  body += '<div class="field"><label>Explicación (se muestra tras responder)</label><textarea class="textarea" id="m-ex-explanation" placeholder="Por qué es correcta esta respuesta...">'+(e?escapeHtml(e.explanation||''):'')+'</textarea></div>';
+  const footer = '<button class="btn btn-primary" data-action="save-exercise" data-id="'+(e?e.id:'')+'">Guardar</button>';
+  openModal(header, body, footer);
   document.getElementById('m-ex-type').addEventListener('change', (ev)=>{
     document.getElementById('m-ex-type-fields').innerHTML = renderExerciseTypeFields(ev.target.value, null);
     wireExerciseTypeFieldEvents();
@@ -1306,20 +1343,20 @@ function wireRemoveOptButtons(){
 function openVocabModal(id){
   const v = id ? DATA.vocabulary.find(x=>x.id===id) : null;
   const categories = vocabCategories();
-  let html = modalHeader(v?'Editar palabra':'Nueva palabra');
-  html += '<div class="field"><label>Término (inglés)</label><input type="text" class="input" id="m-voc-term" value="'+(v?escapeHtml(v.term):'')+'" placeholder="smartwatch"></div>';
-  html += '<div class="field"><label>Traducción de la palabra (español)</label><input type="text" class="input" id="m-voc-tr" value="'+(v?escapeHtml(v.translationEs||''):'')+'" placeholder="reloj inteligente"></div>';
-  html += '<div class="field"><label>Transcripción fonética (opcional)</label><input type="text" class="input" id="m-voc-phonetic" value="'+(v?escapeHtml(v.phonetic||''):'')+'" placeholder="/ˈsmɔːrtwɒtʃ/"></div>';
-  html += '<div class="field"><label>Categoría</label><input type="text" class="input" id="m-voc-category" value="'+(v?escapeHtml(v.category||''):'')+'" placeholder="Ej: Dispositivos electrónicos">';
+  const header = modalHeader(v?'Editar palabra':'Nueva palabra');
+  let body = '<div class="field"><label>Término (inglés)</label><input type="text" class="input" id="m-voc-term" value="'+(v?escapeHtml(v.term):'')+'" placeholder="smartwatch"></div>';
+  body += '<div class="field"><label>Traducción de la palabra (español)</label><input type="text" class="input" id="m-voc-tr" value="'+(v?escapeHtml(v.translationEs||''):'')+'" placeholder="reloj inteligente"></div>';
+  body += '<div class="field"><label>Transcripción fonética (opcional)</label><input type="text" class="input" id="m-voc-phonetic" value="'+(v?escapeHtml(v.phonetic||''):'')+'" placeholder="/ˈsmɔːrtwɒtʃ/"></div>';
+  body += '<div class="field"><label>Categoría</label><input type="text" class="input" id="m-voc-category" value="'+(v?escapeHtml(v.category||''):'')+'" placeholder="Ej: Dispositivos electrónicos">';
   if(categories.length){
-    html += '<div class="category-chip-picker" id="voc-category-chips">' + categories.map(c=>'<button type="button" class="chip" data-fillcategory="'+escapeHtml(c)+'">'+escapeHtml(c)+'</button>').join('') + '</div>';
+    body += '<div class="category-chip-picker" id="voc-category-chips">' + categories.map(c=>'<button type="button" class="chip" data-fillcategory="'+escapeHtml(c)+'">'+escapeHtml(c)+'</button>').join('') + '</div>';
   }
-  html += '<div class="hint-text">Elige una categoría existente tocando un chip o escribe una nueva.</div></div>';
-  html += '<div class="field"><label>Descripción (inglés)</label><textarea class="textarea" id="m-voc-def" placeholder="A wearable electronic device worn on the wrist">'+(v?escapeHtml(v.description||v.definitionEn||''):'')+'</textarea></div>';
-  html += '<div class="field"><label>Traducción de la descripción (español)</label><textarea class="textarea" id="m-voc-def-es" placeholder="Un dispositivo electrónico que se lleva en la muñeca">'+(v?escapeHtml(v.descriptionEs||''):'')+'</textarea></div>';
-  html += '<div class="field"><label>Ejemplo (opcional)</label><input type="text" class="input" id="m-voc-ex" value="'+(v?escapeHtml(v.example||''):'')+'" placeholder="I check the time on my smartwatch."></div>';
-  html += '<button class="btn btn-primary" data-action="save-vocab" data-id="'+(v?v.id:'')+'">Guardar</button>';
-  openModal(html);
+  body += '<div class="hint-text">Elige una categoría existente tocando un chip o escribe una nueva.</div></div>';
+  body += '<div class="field"><label>Descripción (inglés)</label><textarea class="textarea" id="m-voc-def" placeholder="A wearable electronic device worn on the wrist">'+(v?escapeHtml(v.description||v.definitionEn||''):'')+'</textarea></div>';
+  body += '<div class="field"><label>Traducción de la descripción (español)</label><textarea class="textarea" id="m-voc-def-es" placeholder="Un dispositivo electrónico que se lleva en la muñeca">'+(v?escapeHtml(v.descriptionEs||''):'')+'</textarea></div>';
+  body += '<div class="field"><label>Ejemplo (opcional)</label><input type="text" class="input" id="m-voc-ex" value="'+(v?escapeHtml(v.example||''):'')+'" placeholder="I check the time on my smartwatch."></div>';
+  const footer = '<button class="btn btn-primary" data-action="save-vocab" data-id="'+(v?v.id:'')+'">Guardar</button>';
+  openModal(header, body, footer);
   document.querySelectorAll('[data-fillcategory]').forEach(chip=>{
     chip.onclick = ()=>{ document.getElementById('m-voc-category').value = chip.getAttribute('data-fillcategory'); };
   });
@@ -1327,33 +1364,33 @@ function openVocabModal(id){
 function openAchievementModal(id){
   const a = id ? DATA.achievements.find(x=>x.id===id) : null;
   const type = a ? a.type : 'streak_days';
-  let html = modalHeader(a?'Editar logro':'Nuevo logro');
-  html += '<div class="field"><label>Icono (emoji)</label><input type="text" class="input" id="m-ach-icon" value="'+(a?escapeHtml(a.icon||'🏆'):'🏆')+'" maxlength="4"></div>';
-  html += '<div class="field"><label>Nombre</label><input type="text" class="input" id="m-ach-name" value="'+(a?escapeHtml(a.name):'')+'" placeholder="Racha de 20"></div>';
-  html += '<div class="field"><label>Descripción</label><input type="text" class="input" id="m-ach-desc" value="'+(a?escapeHtml(a.description):'')+'" placeholder="Acierta 20 preguntas seguidas"></div>';
-  html += '<div class="field"><label>Tipo</label><select class="select" id="m-ach-type">' +
+  const header = modalHeader(a?'Editar logro':'Nuevo logro');
+  let body = '<div class="field"><label>Icono (emoji)</label><input type="text" class="input" id="m-ach-icon" value="'+(a?escapeHtml(a.icon||'🏆'):'🏆')+'" maxlength="4"></div>';
+  body += '<div class="field"><label>Nombre</label><input type="text" class="input" id="m-ach-name" value="'+(a?escapeHtml(a.name):'')+'" placeholder="Racha de 20"></div>';
+  body += '<div class="field"><label>Descripción</label><input type="text" class="input" id="m-ach-desc" value="'+(a?escapeHtml(a.description):'')+'" placeholder="Acierta 20 preguntas seguidas"></div>';
+  body += '<div class="field"><label>Tipo</label><select class="select" id="m-ach-type">' +
     [['streak_days','Días de racha seguidos'],['correct_streak','Aciertos seguidos'],['total_correct','Aciertos totales'],['exam_count','Número de exámenes'],['exam_score','Nota máxima en examen (%)'],['topic_mastery','Dominio de un tema (%)']]
     .map(([tp,lab])=>'<option value="'+tp+'" '+(type===tp?'selected':'')+'>'+lab+'</option>').join('') + '</select></div>';
-  html += '<div class="field"><label>Objetivo (número)</label><input type="number" class="input" id="m-ach-target" value="'+(a?a.target:20)+'" min="1"></div>';
-  html += '<div class="field" id="m-ach-topic-field" style="'+(type==='topic_mastery'?'':'display:none;')+'"><label>Tema</label><select class="select" id="m-ach-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(a&&a.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
-  html += '<button class="btn btn-primary" data-action="save-achievement" data-id="'+(a?a.id:'')+'">Guardar</button>';
-  openModal(html);
+  body += '<div class="field"><label>Objetivo (número)</label><input type="number" class="input" id="m-ach-target" value="'+(a?a.target:20)+'" min="1"></div>';
+  body += '<div class="field" id="m-ach-topic-field" style="'+(type==='topic_mastery'?'':'display:none;')+'"><label>Tema</label><select class="select" id="m-ach-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(a&&a.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
+  const footer = '<button class="btn btn-primary" data-action="save-achievement" data-id="'+(a?a.id:'')+'">Guardar</button>';
+  openModal(header, body, footer);
   document.getElementById('m-ach-type').addEventListener('change',(ev)=>{
     document.getElementById('m-ach-topic-field').style.display = ev.target.value==='topic_mastery' ? '' : 'none';
   });
 }
 function openHintModal(hintText){
-  openModal(modalHeader('Ayuda') + '<div class="body-text" style="padding-bottom:6px;">'+escapeHtml(hintText)+'</div>');
+  openModal(modalHeader('Ayuda'), '<div class="body-text" style="padding-bottom:6px;">'+escapeHtml(hintText)+'</div>');
 }
 function showConfirm(message, confirmLabel, danger, cancelLabel){
   return new Promise(resolve=>{
-    const html = '<div class="sheet-handle"></div>' +
-      '<div class="body-text" style="padding:8px 4px 20px; text-align:center;">'+escapeHtml(message)+'</div>' +
-      '<div class="btn-block-row">' +
+    const header = '<div class="sheet-handle"></div>';
+    const body = '<div class="body-text" style="padding:4px 4px 4px; text-align:center;">'+escapeHtml(message)+'</div>';
+    const footer = '<div class="btn-block-row">' +
         '<button class="btn btn-secondary" id="confirm-cancel-btn" style="flex:1;">'+escapeHtml(cancelLabel||'Cancelar')+'</button>' +
         '<button class="btn '+(danger?'btn-danger':'btn-primary')+'" id="confirm-ok-btn" style="flex:1;">'+escapeHtml(confirmLabel||'Confirmar')+'</button>' +
       '</div>';
-    openModal(html);
+    openModal(header, body, footer);
     let settled = false;
     modalOnDismiss = ()=>{ if(settled) return; settled=true; resolve(false); };
     document.getElementById('confirm-cancel-btn').onclick = ()=>{ if(settled) return; settled=true; modalOnDismiss=null; closeModal(); resolve(false); };
@@ -1716,7 +1753,10 @@ async function exportData(){
       return;
     }catch(e){}
   }
-  openModal(modalHeader('Copia de seguridad') + '<div class="footnote" style="margin-bottom:8px;">No se pudo iniciar la descarga automática. Copia este texto y guárdalo en un archivo .json:</div><textarea class="textarea" style="min-height:220px;" onclick="this.select()" readonly>'+escapeHtml(json)+'</textarea>');
+  openModal(
+    modalHeader('Copia de seguridad'),
+    '<div class="footnote" style="margin-bottom:8px;">No se pudo iniciar la descarga automática. Copia este texto y guárdalo en un archivo .json:</div><textarea class="textarea" style="min-height:220px;" onclick="this.select()" readonly>'+escapeHtml(json)+'</textarea>'
+  );
 }
 function importData(file){
   if(!file) return;
@@ -1737,6 +1777,9 @@ function importData(file){
 
 /* ======================= KEYBOARD HANDLING (mobile/tablet) ======================= */
 let initialVVHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+let keyboardCurrentlyOpen = false;
+let keyboardLockApplied = false;
+let keyboardLockTimer = null;
 function handleViewportResize(){
   if(!window.visualViewport) return;
   const vv = window.visualViewport;
@@ -1745,6 +1788,20 @@ function handleViewportResize(){
   document.body.classList.toggle('keyboard-open', kbOpen);
   const tabbar = document.getElementById('tabbar');
   if(tabbar) tabbar.classList.toggle('hidden', kbOpen);
+
+  if(kbOpen && !keyboardCurrentlyOpen){
+    keyboardCurrentlyOpen = true;
+    // Espera a que termine el ajuste de scroll que trae el campo a la vista
+    // (ver setupKeyboardScroll) antes de bloquear el fondo, para no cortarlo a medias.
+    clearTimeout(keyboardLockTimer);
+    keyboardLockTimer = setTimeout(()=>{
+      if(keyboardCurrentlyOpen){ lockBodyScroll(); keyboardLockApplied = true; }
+    }, 340);
+  } else if(!kbOpen && keyboardCurrentlyOpen){
+    keyboardCurrentlyOpen = false;
+    clearTimeout(keyboardLockTimer);
+    if(keyboardLockApplied){ keyboardLockApplied = false; unlockBodyScroll(); }
+  }
 }
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', handleViewportResize);
