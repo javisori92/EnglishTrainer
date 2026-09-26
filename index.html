@@ -760,7 +760,8 @@ let state = {
   vocabFilterCategory: 'all',
   vocabSearch: '',
   vocabTranslateShown: {},
-  practice: null,   // {pool, current, sessionCorrect, sessionTotal, topicFilterId, lastId}
+  practice: null,   // {pool, current, seenIds, allCovered, sessionCorrect, sessionTotal, topicFilterId, startTime}
+  practiceResult: null, // resumen de la sesión de práctica al finalizar
   exam: null,       // {questions, index, answers, startTime, config}
   examResult: null
 };
@@ -777,7 +778,7 @@ function setScreen(id){
   doSetScreen(id);
 }
 function doSetScreen(id){
-  if(id !== 'practice') state.practice = null;
+  if(id !== 'practice'){ state.practice = null; state.practiceResult = null; }
   if(id !== 'exam'){ state.exam = null; state.examResult = null; }
   if(id !== 'study') { /* keep studyTopicId so returning to Estudio remembers last topic */ }
   state.screen = id;
@@ -842,18 +843,12 @@ function render(){
 }
 
 /* ======================= HOME ======================= */
-function greeting(){
-  const h = new Date().getHours();
-  if(h<12) return 'Buenos días';
-  if(h<20) return 'Buenas tardes';
-  return 'Buenas noches';
-}
 function renderHome(){
   const hasContent = DATA.topics.length>0 && DATA.exercises.length>0;
   const s = DATA.streak;
   const days = last7Days();
   const dots = days.map(d=>'<div class="streak-dot '+(s.activeDates.includes(d)?'on':'')+'"></div>').join('');
-  let html = '<div class="footnote" style="margin-bottom:2px;">'+greeting()+', Javi 👋</div>';
+  let html = '';
 
   html += '<div class="streak-card"><div class="streak-top"><div class="streak-flame">🔥</div><div><div class="streak-num">'+s.current+' día'+(s.current===1?'':'s')+'</div><div class="streak-sub">Racha actual · récord '+s.longest+'</div></div></div><div class="streak-dots">'+dots+'</div></div>';
 
@@ -933,12 +928,49 @@ function renderStudyTopic(){
 
 /* ======================= PRACTICE ======================= */
 function renderPractice(){
+  if(state.practiceResult) return renderPracticeSummary();
   if(!state.practice){
     // La práctica siempre se inicia desde Estudio (Práctica global o Practicar este tema);
     // esta pantalla solo debería verse mientras hay una sesión activa.
     return '<div class="empty-state"><div class="es-icon">🏋️</div><h3 class="title3">No hay ninguna sesión activa</h3><p>Inicia una práctica desde Estudio, con "Práctica global" o "Practicar este tema" dentro de un tema.</p><button class="btn btn-primary" data-nav="study" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('book',18)+' Ir a Estudio</button></div>';
   }
+  if(state.practice.allCovered) return renderPracticeCovered();
   return renderExerciseRunner('practice');
+}
+function renderPracticeCovered(){
+  const ctx = state.practice;
+  const t = ctx.topicFilterId!=='all' ? topicById(ctx.topicFilterId) : null;
+  let html = '<div class="exercise-wrap">';
+  html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="practice-stop">'+icon('close',15)+' Terminar</button></div>';
+  html += '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Ya has cubierto todos los ejercicios</h3><p>Has practicado los '+ctx.pool.length+' ejercicios disponibles'+(t?' de '+escapeHtml(t.name):'')+'. ¿Qué quieres hacer?</p></div>';
+  html += '<button class="btn btn-primary" data-action="practice-continue">'+icon('dumbbell',18)+' Seguir practicando</button>';
+  html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="practice-finish-session">Finalizar sesión</button>';
+  html += '</div>';
+  return html;
+}
+function renderPracticeSummary(){
+  const r = state.practiceResult;
+  const t = r.topicFilterId!=='all' ? topicById(r.topicFilterId) : null;
+  let html = '<div class="center-col" style="padding:14px 0 6px;">';
+  html += '<div style="font-size:44px; margin-bottom:6px;">🏁</div>';
+  html += '<div class="title2">Sesión completada</div>';
+  html += '<div class="footnote">'+escapeHtml(t?t.name:'Todos los temas')+'</div>';
+  html += '</div>';
+
+  html += '<div class="stat-grid">' +
+    '<div class="stat-card"><div class="stat-num">'+formatDuration(r.durationMs)+'</div><div class="stat-label">Tiempo de estudio</div></div>' +
+    '<div class="stat-card"><div class="stat-num">'+r.sessionTotal+'</div><div class="stat-label">Preguntas respondidas</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:var(--success);">'+r.sessionCorrect+'</div><div class="stat-label">Aciertos</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:var(--danger);">'+r.errors+'</div><div class="stat-label">Errores</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:'+accColor(r.sessionTotal?r.accuracy:null)+';">'+(r.sessionTotal?r.accuracy+'%':'—')+'</div><div class="stat-label">Precisión</div></div>' +
+    '<div class="stat-card"><div class="stat-num">'+r.bestStreak+'</div><div class="stat-label">Mejor racha de aciertos</div></div>' +
+  '</div>';
+
+  html += '<div class="card footnote" style="text-align:center;">Has cubierto '+r.uniqueCovered+' de '+r.poolSize+' ejercicios disponibles en esta sesión.</div>';
+
+  html += '<button class="btn btn-primary" data-action="practice-summary-again">'+icon('dumbbell',18)+' Practicar de nuevo</button>';
+  html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="practice-summary-home">Volver a Inicio</button>';
+  return html;
 }
 
 function buildPracticePool(topicId){
@@ -1611,7 +1643,12 @@ function startPractice(topicId){
   const pool = buildPracticePool(topicId);
   if(pool.length===0){ showToast('⚠️','No hay ejercicios en este tema',''); return; }
   const first = pickAdaptiveExercise(pool, null);
-  state.practice = {pool, topicFilterId:topicId, current:first, answeredState:false, selected:null, textValue:'', lastCorrect:false, sessionCorrect:0, sessionTotal:0};
+  state.practice = {
+    pool, topicFilterId:topicId, current:first, seenIds:new Set([first.id]), allCovered:false,
+    answeredState:false, selected:null, textValue:'', lastCorrect:false,
+    sessionCorrect:0, sessionTotal:0, sessionCurrentStreak:0, sessionBestStreak:0,
+    startTime:Date.now()
+  };
   render();
 }
 // Arranca una sesión de práctica desde cualquier pantalla (p.ej. Estudio), cambiando
@@ -1651,11 +1688,25 @@ function wireRunnerEvents(){
     const stopBtn = document.querySelector('[data-action="practice-stop"]');
     if(stopBtn) stopBtn.onclick = ()=>{
       showConfirm('¿Seguro que quieres terminar?', 'Sí', true, 'No').then(ok=>{
-        if(ok){ state.practice=null; setScreen('home'); }
+        if(ok){ finishPracticeSession(); }
       });
     };
     const hintBtn = document.querySelector('[data-action="show-hint"]');
     if(hintBtn) hintBtn.onclick = ()=> openHintModal(ex.hint);
+    const continueBtn = document.querySelector('[data-action="practice-continue"]');
+    if(continueBtn) continueBtn.onclick = ()=> continuePracticeRound();
+    const finishSessionBtn = document.querySelector('[data-action="practice-finish-session"]');
+    if(finishSessionBtn) finishSessionBtn.onclick = ()=> finishPracticeSession();
+  }
+  if(state.screen==='practice' && state.practiceResult){
+    const againBtn = document.querySelector('[data-action="practice-summary-again"]');
+    if(againBtn) againBtn.onclick = ()=>{
+      const topicId = state.practiceResult.topicFilterId;
+      state.practiceResult = null;
+      startPractice(topicId);
+    };
+    const homeBtn = document.querySelector('[data-action="practice-summary-home"]');
+    if(homeBtn) homeBtn.onclick = ()=> setScreen('home');
   }
   if(state.screen==='exam' && state.exam){
     const ctx = state.exam; const ex = ctx.questions[ctx.index];
@@ -1685,16 +1736,64 @@ function submitPracticeAnswer(userInput){
   const ctx = state.practice; const ex = ctx.current;
   const isCorrect = checkAnswer(ex, ex.type==='multiple_choice'?userInput:(ex.type==='true_false'?userInput:userInput));
   ctx.answeredState = true; ctx.selected = userInput; ctx.lastCorrect = isCorrect;
-  ctx.sessionTotal++; if(isCorrect) ctx.sessionCorrect++;
+  ctx.sessionTotal++;
+  if(isCorrect){
+    ctx.sessionCorrect++;
+    ctx.sessionCurrentStreak++;
+    ctx.sessionBestStreak = Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak);
+  } else {
+    ctx.sessionCurrentStreak = 0;
+  }
   recordAnswer(ex, isCorrect);
   beep(isCorrect?880:220, isCorrect?140:220);
   render();
 }
 function nextPracticeExercise(){
   const ctx = state.practice;
-  const nextEx = pickAdaptiveExercise(ctx.pool, ctx.current.id);
+  const remaining = ctx.pool.filter(e=>!ctx.seenIds.has(e.id));
+  if(remaining.length===0){
+    ctx.allCovered = true;
+    render();
+    return;
+  }
+  const nextEx = pickAdaptiveExercise(remaining, null);
+  ctx.seenIds.add(nextEx.id);
   ctx.current = nextEx; ctx.answeredState=false; ctx.selected=null; ctx.textValue=''; ctx.lastCorrect=false;
   render();
+}
+function continuePracticeRound(){
+  const ctx = state.practice;
+  if(!ctx) return;
+  ctx.seenIds = new Set();
+  ctx.allCovered = false;
+  const nextEx = pickAdaptiveExercise(ctx.pool, ctx.current ? ctx.current.id : null);
+  ctx.seenIds.add(nextEx.id);
+  ctx.current = nextEx; ctx.answeredState=false; ctx.selected=null; ctx.textValue=''; ctx.lastCorrect=false;
+  render();
+}
+function finishPracticeSession(){
+  const ctx = state.practice;
+  if(!ctx){ setScreen('home'); return; }
+  state.practiceResult = {
+    topicFilterId: ctx.topicFilterId,
+    sessionCorrect: ctx.sessionCorrect,
+    sessionTotal: ctx.sessionTotal,
+    errors: ctx.sessionTotal - ctx.sessionCorrect,
+    accuracy: ctx.sessionTotal>0 ? Math.round(ctx.sessionCorrect/ctx.sessionTotal*100) : 0,
+    bestStreak: ctx.sessionBestStreak,
+    uniqueCovered: ctx.seenIds.size,
+    poolSize: ctx.pool.length,
+    durationMs: Date.now() - ctx.startTime
+  };
+  state.practice = null;
+  render();
+  window.scrollTo(0,0);
+}
+function formatDuration(ms){
+  const totalSec = Math.max(0, Math.round(ms/1000));
+  const min = Math.floor(totalSec/60);
+  const sec = totalSec%60;
+  return min===0 ? (sec+' s') : (min+' min '+sec+' s');
 }
 function startExam(cfg){
   const questions = buildExamQuestions(cfg);
