@@ -96,11 +96,8 @@ a{color:var(--accent); text-decoration:none;}
 .title1{font-size:26px; font-weight:800; letter-spacing:-.01em;}
 .title2{font-size:21px; font-weight:700;}
 .title3{font-size:18px; font-weight:700;}
-.headline{font-size:16px; font-weight:600;}
 .body-text{font-size:16px; font-weight:400; line-height:1.5;}
-.subhead{font-size:14px; font-weight:500; color:var(--text-secondary);}
 .footnote{font-size:13px; color:var(--text-secondary);}
-.caption{font-size:11px; color:var(--text-tertiary); font-weight:600; letter-spacing:.01em;}
 
 /* Layout shell */
 #app-root{min-height:100dvh; display:flex; flex-direction:column;}
@@ -194,7 +191,6 @@ a{color:var(--accent); text-decoration:none;}
 .btn-primary:active{opacity:.8;}
 .btn-secondary{background:var(--accent-soft); color:var(--accent);}
 .btn-danger{background:var(--danger-soft); color:var(--danger);}
-.btn-plain{background:none; color:var(--accent); font-weight:600; padding:10px;}
 .text-action-btn{
   display:inline-flex; align-items:center; gap:4px; background:none; border:none;
   color:var(--accent); font-size:14px; font-weight:600; padding:6px 9px; border-radius:8px; white-space:nowrap;
@@ -291,7 +287,6 @@ a{color:var(--accent); text-decoration:none;}
 .exercise-card{background:var(--card); border-radius:var(--radius-l); padding:20px; box-shadow:var(--shadow); margin-bottom:16px;}
 .ex-topic-tag{font-size:12px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:.03em;}
 .ex-card-header{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:8px;}
-.ex-header-actions{display:flex; gap:8px; flex-shrink:0;}
 .help-btn{
   flex-shrink:0; width:30px; height:30px; border-radius:15px; background:var(--bg-secondary);
   display:flex; align-items:center; justify-content:center; color:var(--accent); border:none; margin-top:-4px;
@@ -1099,9 +1094,6 @@ function renderExamResult(){
 }
 
 /* ======================= EXERCISE RUNNER (shared: practice + exam) ======================= */
-function currentRunnerCtx(){
-  return state.screen==='exam' ? state.exam : state.practice;
-}
 function renderExerciseRunner(mode){
   const ctx = mode==='exam' ? state.exam : state.practice;
   const ex = mode==='exam' ? ctx.questions[ctx.index] : ctx.current;
