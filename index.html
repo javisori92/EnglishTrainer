@@ -299,21 +299,58 @@ a{color:var(--accent); text-decoration:none;}
 }
 .vocab-speak-btn svg{width:13px; height:13px;}
 .vocab-speak-btn:active{background:var(--accent-soft);}
-/* Emparejar */
-.match-grid{display:flex; gap:10px; margin-top:14px;}
-.match-col{flex:1; display:flex; flex-direction:column; gap:8px; min-width:0;}
-.match-item{
-  padding:12px 10px; border-radius:10px; background:var(--bg-secondary); border:2px solid transparent;
-  font-size:14px; font-weight:600; text-align:left; line-height:1.3; color:var(--text);
+/* Ejercicios: bloques de preguntas */
+.ex-title{font-size:18px; font-weight:700; line-height:1.35;}
+.unit-items{margin-top:4px;}
+.unit-item{padding:12px 0; border-bottom:1px solid var(--separator);}
+.unit-item:last-child{border-bottom:none; padding-bottom:0;}
+.unit-item.single{border-bottom:none; padding-top:0;}
+.unit-head{display:flex; align-items:flex-start; gap:8px;}
+.unit-prompt{flex:1; min-width:0; font-size:16px; line-height:1.5;}
+.unit-num{font-weight:700; color:var(--text-secondary); margin-right:6px;}
+.unit-correct{font-size:13px; font-weight:700; color:var(--success); margin-top:2px; line-height:1.4;}
+.inline-input{
+  display:inline-block; width:auto; min-width:96px; max-width:100%; margin:2px 4px; padding:6px 10px;
+  border:none; border-bottom:2px solid var(--accent); border-radius:8px 8px 0 0; background:var(--bg-secondary);
+  font-size:16px; font-weight:600; color:var(--text); outline:none; vertical-align:middle;
 }
-.match-item.selected{border-color:var(--accent); background:var(--accent-soft); color:var(--accent);}
-.match-item.matched{border-color:var(--success); background:var(--success-soft); color:var(--success); opacity:.75;}
-.match-item.wrong{border-color:var(--danger); background:var(--danger-soft); color:var(--danger);}
-/* Banco de palabras */
-.bank-chip{padding:10px 16px; border-radius:20px; background:var(--bg-secondary); border:2px solid transparent; font-size:15px; font-weight:600;}
-.bank-chip.correct{border-color:var(--success); background:var(--success-soft); color:var(--success);}
-.bank-chip.incorrect{border-color:var(--danger); background:var(--danger-soft); color:var(--danger);}
-.bank-chip.selected{border-color:var(--accent);}
+.inline-input.block-input{display:block; width:100%; margin:8px 0 0;}
+.inline-input.correct{border-color:var(--success); background:var(--success-soft); color:var(--success);}
+.inline-input.incorrect{border-color:var(--danger); background:var(--danger-soft); color:var(--danger);}
+.tf-btn.selected{border-color:var(--accent);}
+.code-area{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:14px; min-height:180px; line-height:1.5;}
+/* Tablero de arrastrar (unir / banco de palabras) */
+.assign-board{margin-top:6px;}
+.assign-row{padding:8px 0; font-size:16px; line-height:2.2;}
+.assign-row.match{display:flex; align-items:center; justify-content:space-between; gap:12px; line-height:1.4;}
+.assign-label{flex:1; min-width:0;}
+.assign-slot{
+  display:inline-flex; align-items:center; justify-content:center; min-width:112px; min-height:40px; padding:3px; margin:0 4px;
+  border:2px dashed var(--separator); border-radius:12px; background:var(--bg-secondary); vertical-align:middle;
+  box-sizing:border-box; transition:border-color .12s, background .12s;
+}
+.assign-slot.filled{border-style:solid; border-color:var(--accent); background:var(--accent-soft);}
+.assign-slot.over{border-style:solid; border-color:var(--accent); background:var(--accent-soft);}
+.assign-slot.correct{border-style:solid; border-color:var(--success); background:var(--success-soft);}
+.assign-slot.incorrect{border-style:solid; border-color:var(--danger); background:var(--danger-soft);}
+.assign-slot.correct .assign-chip{color:var(--success);}
+.assign-slot.incorrect .assign-chip{color:var(--danger);}
+.assign-empty{display:inline-block; width:1px; height:1px;}
+.assign-pool{display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; padding-top:14px; border-top:1px solid var(--separator);}
+.assign-chip{
+  display:inline-block; padding:8px 14px; border-radius:18px; background:var(--accent-soft); color:var(--accent);
+  border:2px solid transparent; font-size:15px; font-weight:700; line-height:1.2; touch-action:none;
+  user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; cursor:grab;
+}
+.assign-chip.armed{border-color:var(--accent);}
+.assign-chip.in-slot{background:transparent; padding:6px 10px;}
+.assign-chip.dragging{opacity:.25;}
+.assign-fix{margin-top:-2px; padding-left:4px;}
+.drag-ghost{
+  position:fixed; left:0; top:0; z-index:300; pointer-events:none; padding:8px 14px; border-radius:18px;
+  background:var(--accent); color:#fff; font-size:15px; font-weight:700; line-height:1.2; text-align:center;
+  box-shadow:0 10px 24px rgba(0,0,0,.3); will-change:transform; box-sizing:border-box;
+}
 /* Botón de audio del enunciado */
 .speak-btn{
   flex-shrink:0; width:30px; height:30px; border-radius:15px; background:var(--bg-secondary);
@@ -492,6 +529,7 @@ function defaultData(){
   return {
     meta:{version:1, createdAt:Date.now()},
     topics: [],
+    blocks: [],
     exercises: [],
     vocabulary: [],
     achievements: [
@@ -517,8 +555,9 @@ let DATA = loadData();
 function normalizeData(parsed){
   const d = defaultData();
   if(!parsed || typeof parsed!=='object') return d;
-  return Object.assign(d, parsed, {
+  const out = Object.assign(d, parsed, {
     topics: Array.isArray(parsed.topics) ? parsed.topics : [],
+    blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
     exercises: Array.isArray(parsed.exercises) ? parsed.exercises : [],
     vocabulary: Array.isArray(parsed.vocabulary) ? parsed.vocabulary : [],
     achievements: Array.isArray(parsed.achievements) ? parsed.achievements : d.achievements,
@@ -529,6 +568,39 @@ function normalizeData(parsed){
     settings: Object.assign(d.settings, parsed.settings||{}),
     unlockedAchievementIds: Array.isArray(parsed.unlockedAchievementIds) ? parsed.unlockedAchievementIds : []
   });
+  migrateToBlocks(out);
+  return out;
+}
+// Los ejercicios antiguos (una sola pregunta suelta) pasan a ser bloques de una pregunta,
+// conservando su id (y por tanto su progreso). Los "emparejar" con pares se dividen en preguntas.
+function migrateToBlocks(d){
+  const blockIds = new Set(d.blocks.map(b=>b.id));
+  const items = [];
+  d.exercises.forEach(ex=>{
+    if(ex.blockId){ if(blockIds.has(ex.blockId)) items.push(ex); return; }
+    const base = {id:uid(), topicId:ex.topicId, title:'', hint:ex.hint||'', explanation:ex.explanation||'', extraWords:[], createdAt:ex.createdAt||Date.now()};
+    if(ex.type==='matching'){
+      if(!Array.isArray(ex.pairs) || !ex.pairs.length) return;
+      const b = Object.assign(base, {kind:'matching', title:ex.prompt||''});
+      d.blocks.push(b);
+      ex.pairs.forEach(p=> items.push({id:uid(), blockId:b.id, topicId:ex.topicId, type:'matching', prompt:p.right, correctAnswer:p.left, createdAt:Date.now()}));
+      delete d.progress[ex.id];
+      return;
+    }
+    const b = Object.assign(base, {kind:ex.type});
+    if(ex.type==='word_bank'){
+      let removed = false;
+      b.extraWords = (ex.wordBank||[]).filter(w=>{
+        if(!removed && normalizeStr(w)===normalizeStr(ex.correctAnswer)){ removed = true; return false; }
+        return true;
+      });
+    }
+    d.blocks.push(b);
+    ex.blockId = b.id;
+    delete ex.hint; delete ex.explanation; delete ex.wordBank;
+    items.push(ex);
+  });
+  d.exercises = items;
 }
 function loadData(){
   try{
@@ -565,7 +637,6 @@ function mdLite(text){
   return html;
 }
 function topicById(id){ return DATA.topics.find(t=>t.id===id); }
-function exById(id){ return DATA.exercises.find(e=>e.id===id); }
 function vocabCategories(){
   return Array.from(new Set(DATA.vocabulary.map(v=>v.category).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'es'));
 }
@@ -594,8 +665,29 @@ function accBadgeClass(pct){
   if(pct>=50) return 'badge-orange';
   return 'badge-red';
 }
-function typeLabel(t){
-  return {multiple_choice:'Opción múltiple', fill_blank:'Rellenar hueco', true_false:'Verdadero / Falso', translation:'Traducción', word_bank:'Banco de palabras', matching:'Emparejar'}[t] || t;
+const KIND_META = {
+  fill_blank:{label:'Rellenar huecos'},
+  multiple_choice:{label:'Opción múltiple'},
+  true_false:{label:'Verdadero / Falso'},
+  translation:{label:'Traducción / frase'},
+  matching:{label:'Unir (arrastrar)'},
+  word_bank:{label:'Banco de palabras'}
+};
+const ASSIGN_KINDS = ['matching','word_bank'];
+function typeLabel(t){ return (KIND_META[t]||{}).label || t; }
+function topicCategory(t){ return (t && t.category) || 'grammar'; }
+function categoryLabel(c){ return c==='vocabulary' ? 'Vocabulario' : 'Gramática'; }
+function blockById(id){ return DATA.blocks.find(b=>b.id===id); }
+function itemsOfBlock(b){ return DATA.exercises.filter(e=>e.blockId===b.id); }
+function blockTitle(b){
+  if(b.title) return b.title;
+  const it = itemsOfBlock(b)[0];
+  return it ? it.prompt : '(sin título)';
+}
+function blockAccuracy(b){
+  let c = 0, a = 0;
+  itemsOfBlock(b).forEach(e=>{ const p = getProgress(e.id); c += p.correct; a += p.attempts; });
+  return {attempts:a, correct:c, pct: a>0 ? Math.round(c/a*100) : null};
 }
 
 /* ======================= STREAK ======================= */
@@ -713,18 +805,35 @@ function exerciseWeight(ex){
   if(t.attempts >= 4 && t.pct !== null && t.pct < 60) weight *= 1.4;
   return Math.max(weight, 1);
 }
-function pickAdaptiveExercise(pool, excludeId){
-  let candidates = pool.filter(e=>e.id !== excludeId);
-  if(candidates.length === 0) candidates = pool;
-  if(candidates.length === 0) return null;
-  const weights = candidates.map(exerciseWeight);
+function pickWeighted(list, weightFn){
+  if(!list.length) return null;
+  const weights = list.map(weightFn);
   const total = weights.reduce((a,b)=>a+b,0);
   let r = Math.random()*total;
-  for(let i=0;i<candidates.length;i++){
-    r -= weights[i];
-    if(r<=0) return candidates[i];
-  }
-  return candidates[candidates.length-1];
+  for(let i=0;i<list.length;i++){ r -= weights[i]; if(r<=0) return list[i]; }
+  return list[list.length-1];
+}
+// Una "unidad" es un ejercicio (bloque) con todas sus preguntas.
+function unitWeight(u){ return u.items.reduce((s,e)=>s+exerciseWeight(e),0) / u.items.length; }
+function normFilter(f){ return (typeof f==='string') ? {topicId:f} : (f||{}); }
+function buildUnits(f){
+  f = normFilter(f);
+  return DATA.blocks.filter(b=>{
+    if(f.blockId && b.id!==f.blockId) return false;
+    if(f.kind && b.kind!==f.kind) return false;
+    if(f.topicId && f.topicId!=='all' && b.topicId!==f.topicId) return false;
+    if(f.topics && !(f.topics.length===1 && f.topics[0]==='all') && !f.topics.includes(b.topicId)) return false;
+    if(f.category && f.category!=='all' && topicCategory(topicById(b.topicId))!==f.category) return false;
+    return true;
+  }).map(b=>({key:b.id, block:b, items:itemsOfBlock(b), kind:b.kind, topicId:b.topicId})).filter(u=>u.items.length);
+}
+function filterLabel(f){
+  f = normFilter(f);
+  if(f.blockId){ const b = blockById(f.blockId); return b ? blockTitle(b) : 'Ejercicio'; }
+  if(f.kind) return typeLabel(f.kind);
+  if(f.topicId && f.topicId!=='all'){ const t = topicById(f.topicId); return t ? t.name : 'Tema'; }
+  if(f.category && f.category!=='all') return categoryLabel(f.category);
+  return 'Todos los temas';
 }
 function recordAnswer(ex, isCorrect){
   const p = DATA.progress[ex.id] || {attempts:0, correct:0, incorrect:0, box:0, lastSeen:null};
@@ -758,22 +867,45 @@ function normalizeStr(s){
     .replace(/[.!?,;:]+$/g, '')
     .trim();
 }
-function checkAnswer(ex, userInput){
-  if(ex.type==='multiple_choice'){
-    return Number(userInput) === Number(ex.correctIndex);
-  }
-  if(ex.type==='word_bank'){
-    return normalizeStr(userInput) === normalizeStr(ex.correctAnswer);
-  }
-  if(ex.type==='true_false'){
-    return Boolean(userInput) === Boolean(ex.correctBool);
-  }
-  if(ex.type==='fill_blank' || ex.type==='translation'){
-    const accepted = (ex.acceptedAnswers||[]).map(normalizeStr);
-    return accepted.includes(normalizeStr(userInput));
-  }
-  return false;
+// Cada pregunta se corrige por separado (acierto o fallo propio).
+function evalItem(ex, val){
+  if(val===null || val===undefined || val==='') return false;
+  if(ex.type==='multiple_choice') return Number(val)===Number(ex.correctIndex);
+  if(ex.type==='true_false') return Boolean(val)===Boolean(ex.correctBool);
+  if(ex.type==='word_bank' || ex.type==='matching') return normalizeStr(val)===normalizeStr(ex.correctAnswer);
+  return (ex.acceptedAnswers||[]).map(normalizeStr).includes(normalizeStr(val));
 }
+function correctLabel(ex){
+  if(ex.type==='multiple_choice') return ex.options[ex.correctIndex];
+  if(ex.type==='true_false') return ex.correctBool ? 'Verdadero' : 'Falso';
+  if(ex.type==='word_bank' || ex.type==='matching') return ex.correctAnswer;
+  return (ex.acceptedAnswers||[])[0] || '';
+}
+function userLabel(ex, val){
+  if(val===null || val===undefined || val==='') return '(sin responder)';
+  if(ex.type==='multiple_choice') return ex.options[val];
+  if(ex.type==='true_false') return val ? 'Verdadero' : 'Falso';
+  return String(val);
+}
+function poolWordsFor(u){
+  const answers = u.items.map(i=>i.correctAnswer);
+  return u.kind==='word_bank' ? answers.concat(u.block.extraWords||[]) : answers;
+}
+function newUnitState(u){
+  const us = {answers:u.items.map(()=>null), checked:false, results:null};
+  if(ASSIGN_KINDS.includes(u.kind)){
+    us.pool = shuffleArray(poolWordsFor(u));
+    us.placed = u.items.map(()=>null);
+    us.armed = null;
+  }
+  return us;
+}
+function unitValues(u, us){
+  if(ASSIGN_KINDS.includes(u.kind)) return u.items.map((_,i)=> us.placed[i]!=null ? us.pool[us.placed[i]] : null);
+  return us.answers.slice();
+}
+function unitHasAnswers(u, us){ return unitValues(u, us).some(v=>v!==null && v!==undefined && v!==''); }
+function unitAutoCheck(u){ return u.items.length===1 && ['multiple_choice','true_false','word_bank'].includes(u.kind); }
 
 /* ======================= APP STATE / ROUTER ======================= */
 const TABS = [
@@ -795,20 +927,21 @@ const DESKTOP_ITEMS = [
 let state = {
   screen: 'home',
   studyTopicId: null,
+  studyCategory: 'all',
   contentTab: 'topics',
   contentFilterTopic: 'all',
   vocabFilterCategory: 'all',
   vocabSearch: '',
   vocabTranslateShown: {},
-  practice: null,   // {pool, current, seenIds, allCovered, sessionCorrect, sessionTotal, topicFilterId, startTime}
+  practice: null,   // {pool, filter, current, us, seenIds, allCovered, sessionCorrect, sessionTotal, startTime}
   practiceResult: null, // resumen de la sesión de práctica al finalizar
-  exam: null,       // {questions, index, answers, startTime, config}
+  exam: null,       // {units, index, states, startTime, config}
   examResult: null
 };
 
 function setScreen(id){
   if(id === state.screen) { return; }
-  const examInProgress = state.exam && Object.keys(state.exam.answers||{}).length>0;
+  const examInProgress = state.exam && state.exam.units.some(u=>unitHasAnswers(u, state.exam.states[u.key]));
   if(examInProgress && id!=='exam'){
     showConfirm('Tienes un examen en curso. Si sales ahora perderás las respuestas de esta sesión.', 'Salir del examen', true).then(ok=>{
       if(ok) doSetScreen(id);
@@ -936,32 +1069,46 @@ function renderStudyList(){
   if(DATA.topics.length===0){
     return '<div class="empty-state"><div class="es-icon">📘</div><h3 class="title3">Aún no hay temas</h3><p>Crea tu primer tema en Gestionar Contenido para empezar a estudiar gramática y vocabulario.</p><button class="btn btn-primary" data-nav="content" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('plus',18)+' Crear tema</button></div>';
   }
-  let html = '';
-  if(DATA.exercises.length>0){
-    html += '<button class="btn btn-primary" data-action="practice-global" style="margin-bottom:14px;">'+icon('dumbbell',18)+' Práctica global</button>';
+  const cat = state.studyCategory;
+  const topics = DATA.topics.filter(t=> cat==='all' || topicCategory(t)===cat);
+  const units = buildUnits({category:cat});
+  let html = '<div class="chip-row">' + [['all','Todo'],['grammar','Gramática'],['vocabulary','Vocabulario']].map(([id,l])=>'<button class="chip '+(cat===id?'active':'')+'" data-scat="'+id+'">'+l+'</button>').join('') + '</div>';
+  if(units.length){
+    html += '<button class="btn btn-primary" data-action="practice-global" style="margin-bottom:14px;">'+icon('dumbbell',18)+' Práctica global'+(cat!=='all'?' · '+categoryLabel(cat):'')+'</button>';
+    const kinds = Array.from(new Set(units.map(u=>u.kind)));
+    html += '<div class="section-label" style="margin-top:2px;">Practicar por tipo de ejercicio</div><div class="chip-row">' + kinds.map(k=>'<button class="chip" data-practice-kind="'+k+'">'+typeLabel(k)+'</button>').join('') + '</div>';
   }
-  html += '<div class="list">';
-  html += DATA.topics.map(t=>{
+  if(!topics.length){
+    return html + '<div class="empty-state"><p>No hay temas en esta categoría.</p></div>';
+  }
+  html += '<div class="list">' + topics.map(t=>{
     const a = topicAccuracy(t.id);
-    const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
-    return '<button class="list-row" data-study-topic="'+t.id+'"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+exCount+' ejercicios</div></div><span class="badge '+accBadgeClass(a.pct)+'">'+(a.pct===null?'Nuevo':a.pct+'%')+'</span><span class="chev">'+icon('chevright',18)+'</span></button>';
-  }).join('');
-  html += '</div>';
+    const bl = DATA.blocks.filter(b=>b.topicId===t.id).length;
+    const q = DATA.exercises.filter(e=>e.topicId===t.id).length;
+    return '<button class="list-row" data-study-topic="'+t.id+'"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+categoryLabel(topicCategory(t))+' · '+bl+' ejercicio'+(bl===1?'':'s')+' · '+q+' pregunta'+(q===1?'':'s')+'</div></div><span class="badge '+accBadgeClass(a.pct)+'">'+(a.pct===null?'Nuevo':a.pct+'%')+'</span><span class="chev">'+icon('chevright',18)+'</span></button>';
+  }).join('') + '</div>';
   return html;
 }
 function renderStudyTopic(){
   const t = topicById(state.studyTopicId);
   if(!t){ state.studyTopicId=null; return renderStudyList(); }
-  const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
+  const blocks = DATA.blocks.filter(b=>b.topicId===t.id);
+  const qCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
   let html = '<button class="back-btn" data-action="study-back">'+icon('chevleft',26)+'<span>Temas</span></button>';
-  html += '<div class="title1" style="margin-bottom:12px;">'+escapeHtml(t.name)+'</div>';
+  html += '<div class="title1" style="margin-bottom:4px;">'+escapeHtml(t.name)+'</div>';
+  html += '<div class="footnote" style="margin-bottom:12px;">'+categoryLabel(topicCategory(t))+'</div>';
   if(t.grammarNotes){
     html += '<div class="card body-text">'+mdLite(t.grammarNotes)+'</div>';
   } else {
-    html += '<div class="card footnote">Aún no hay apuntes de gramática para este tema. Añádelos desde Gestionar Contenido.</div>';
+    html += '<div class="card footnote">Aún no hay apuntes para este tema. Añádelos desde Gestionar Contenido.</div>';
   }
-  if(exCount>0){
-    html += '<button class="btn btn-primary" data-practice-topic="'+t.id+'">'+icon('dumbbell',18)+' Practicar este tema ('+exCount+')</button>';
+  if(blocks.length){
+    html += '<button class="btn btn-primary" data-practice-topic="'+t.id+'">'+icon('dumbbell',18)+' Practicar este tema ('+qCount+' preguntas)</button>';
+    html += '<div class="section-label">Ejercicios del tema</div><div class="list">' + blocks.map(b=>{
+      const a = blockAccuracy(b);
+      const n = itemsOfBlock(b).length;
+      return '<button class="list-row" data-practice-block="'+b.id+'"><div class="lr-main"><div class="lr-title">'+escapeHtml(blockTitle(b))+'</div><div class="lr-sub">'+typeLabel(b.kind)+' · '+n+' pregunta'+(n===1?'':'s')+'</div></div><span class="badge '+accBadgeClass(a.pct)+'">'+(a.pct===null?'Nuevo':a.pct+'%')+'</span><span class="chev">'+icon('chevright',18)+'</span></button>';
+    }).join('') + '</div>';
   }
   return html;
 }
@@ -979,10 +1126,10 @@ function renderPractice(){
 }
 function renderPracticeCovered(){
   const ctx = state.practice;
-  const t = ctx.topicFilterId!=='all' ? topicById(ctx.topicFilterId) : null;
+  const label = filterLabel(ctx.filter);
   let html = '<div class="exercise-wrap">';
   html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="practice-stop">'+icon('close',15)+' Terminar</button></div>';
-  html += '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Ya has cubierto todos los ejercicios</h3><p>Has practicado los '+ctx.pool.length+' ejercicios disponibles'+(t?' de '+escapeHtml(t.name):'')+'. ¿Qué quieres hacer?</p></div>';
+  html += '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Ya has cubierto todos los ejercicios</h3><p>Has practicado los '+ctx.pool.length+' ejercicios disponibles'+(label!=='Todos los temas'?' de «'+escapeHtml(label)+'»':'')+'. ¿Qué quieres hacer?</p></div>';
   html += '<button class="btn btn-primary" data-action="practice-continue">'+icon('dumbbell',18)+' Seguir practicando</button>';
   html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="practice-finish-session">Finalizar sesión</button>';
   html += '</div>';
@@ -990,11 +1137,10 @@ function renderPracticeCovered(){
 }
 function renderPracticeSummary(){
   const r = state.practiceResult;
-  const t = r.topicFilterId!=='all' ? topicById(r.topicFilterId) : null;
   let html = '<div class="center-col" style="padding:14px 0 6px;">';
   html += '<div style="font-size:44px; margin-bottom:6px;">🏁</div>';
   html += '<div class="title2">Sesión completada</div>';
-  html += '<div class="footnote">'+escapeHtml(t?t.name:'Todos los temas')+'</div>';
+  html += '<div class="footnote">'+escapeHtml(r.filterLabel)+'</div>';
   html += '</div>';
 
   html += '<div class="stat-grid">' +
@@ -1013,9 +1159,6 @@ function renderPracticeSummary(){
   return html;
 }
 
-function buildPracticePool(topicId){
-  return topicId==='all' ? DATA.exercises.slice() : DATA.exercises.filter(e=>e.topicId===topicId);
-}
 
 /* ======================= EXAM ======================= */
 function renderExam(){
@@ -1024,34 +1167,37 @@ function renderExam(){
   if(DATA.exercises.length===0){
     return '<div class="empty-state"><div class="es-icon">📝</div><h3 class="title3">No hay ejercicios todavía</h3><p>Necesitas ejercicios para poder generar un examen. Añádelos en Gestionar Contenido.</p><button class="btn btn-primary" data-nav="content" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('plus',18)+' Añadir ejercicios</button></div>';
   }
+  const cat = examConfig.category;
   const counts = [5,10,15,20];
+  const totalQ = buildUnits({category:cat}).reduce((s,u)=>s+u.items.length,0);
+  const topics = DATA.topics.filter(t=> DATA.blocks.some(b=>b.topicId===t.id) && (cat==='all' || topicCategory(t)===cat));
   let html = '<div class="card"><div class="title3" style="margin-bottom:10px;">Configura tu examen</div>';
-  html += '<div class="field"><label>Número de preguntas</label><div class="chip-row" id="exam-count-chips">';
-  html += counts.map(n=>'<button class="chip '+(n===DATA.settings.examQuestionCount?'active':'')+'" data-ecount="'+n+'">'+n+'</button>').join('');
-  html += '<button class="chip '+(DATA.settings.examQuestionCount==='all'?'active':'')+'" data-ecount="all">Todas ('+DATA.exercises.length+')</button></div></div>';
+  html += '<div class="field"><label>Contenido</label><div class="chip-row">' + [['all','Todo'],['grammar','Gramática'],['vocabulary','Vocabulario']].map(([id,l])=>'<button class="chip '+(cat===id?'active':'')+'" data-ecat="'+id+'">'+l+'</button>').join('') + '</div></div>';
+  html += '<div class="field"><label>Número de preguntas (aprox.)</label><div class="chip-row" id="exam-count-chips">';
+  html += counts.map(n=>'<button class="chip '+(n===examConfig.count?'active':'')+'" data-ecount="'+n+'">'+n+'</button>').join('');
+  html += '<button class="chip '+(examConfig.count==='all'?'active':'')+'" data-ecount="all">Todas ('+totalQ+')</button></div></div>';
   html += '<div class="field"><label>Temas incluidos</label><div class="chip-row" id="exam-topic-chips"><button class="chip active" data-etopic="all">Todos</button>';
-  html += DATA.topics.filter(t=>DATA.exercises.some(e=>e.topicId===t.id)).map(t=>'<button class="chip" data-etopic="'+t.id+'">'+escapeHtml(t.name)+'</button>').join('');
+  html += topics.map(t=>'<button class="chip" data-etopic="'+t.id+'">'+escapeHtml(t.name)+'</button>').join('');
   html += '</div></div>';
   html += '<button class="btn btn-primary" data-action="start-exam">'+icon('exam',18)+' Comenzar examen</button></div>';
-  html += '<div class="card footnote">Durante el examen no verás si aciertas o fallas hasta el final, como en un examen real. Al terminar obtendrás tu nota y un análisis por tema. Los ejercicios de tipo "Emparejar" no se incluyen en los exámenes.</div>';
+  html += '<div class="card footnote">Los ejercicios se presentan completos (con todas sus preguntas) y no verás si aciertas o fallas hasta el final, como en un examen real. Cada pregunta puntúa por separado y obtendrás tu nota y un análisis por tema.</div>';
   return html;
 }
 
-let examConfig = {count:10, topics:['all']};
+let examConfig = {count:10, topics:['all'], category:'all'};
 
-function buildExamQuestions(cfg){
-  let pool = DATA.exercises.filter(e=>e.type!=='matching'); // el emparejar no encaja en el formato de examen
-  if(!(cfg.topics.length===1 && cfg.topics[0]==='all')){
-    pool = pool.filter(e=>cfg.topics.includes(e.topicId));
+function buildExamUnits(cfg){
+  const pool = buildUnits({category:cfg.category, topics:cfg.topics});
+  const target = cfg.count==='all' ? Infinity : cfg.count;
+  const chosen = [];
+  let total = 0;
+  while(pool.length && total<target){
+    const u = pickWeighted(pool, unitWeight);
+    pool.splice(pool.indexOf(u), 1);
+    chosen.push(u);
+    total += u.items.length;
   }
-  // shuffle
-  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
-  // weight toward weaker topics slightly using adaptive weight as sort bias but keep coverage: sort by weight desc, then take top N shuffled again
-  pool.sort((a,b)=> exerciseWeight(b)-exerciseWeight(a));
-  const n = cfg.count==='all' ? pool.length : Math.min(cfg.count, pool.length);
-  const top = pool.slice(0, Math.max(n, Math.min(pool.length, n*2)));
-  for(let i=top.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [top[i],top[j]]=[top[j],top[i]]; }
-  return top.slice(0,n);
+  return shuffleArray(chosen);
 }
 
 function renderExamResult(){
@@ -1076,13 +1222,9 @@ function renderExamResult(){
   if(missed.length){
     html += '<div class="section-label">Preguntas falladas ('+missed.length+')</div>';
     html += missed.map(d=>{
-      const ex = d.ex;
-      let correctText = '';
-      if(ex.type==='multiple_choice') correctText = ex.options[ex.correctIndex];
-      else if(ex.type==='true_false') correctText = ex.correctBool ? 'Verdadero' : 'Falso';
-      else if(ex.type==='word_bank') correctText = ex.correctAnswer;
-      else correctText = (ex.acceptedAnswers||[])[0] || '';
-      return '<div class="card"><div class="footnote" style="margin-bottom:4px;">'+escapeHtml(topicById(ex.topicId)?topicById(ex.topicId).name:'')+'</div><div class="body-text" style="font-weight:600; margin-bottom:6px;">'+escapeHtml(ex.prompt)+'</div><div class="footnote">Tu respuesta: <span style="color:var(--danger); font-weight:600;">'+escapeHtml(String(d.userAnswerLabel))+'</span></div><div class="footnote">Correcta: <span style="color:var(--success); font-weight:600;">'+escapeHtml(String(correctText))+'</span></div>'+(ex.explanation?'<div class="footnote" style="margin-top:6px;">'+escapeHtml(ex.explanation)+'</div>':'')+'</div>';
+      const ex = d.ex; const t = topicById(ex.topicId);
+      const ctxLine = (d.block && d.block.title) ? '<div class="footnote" style="margin-bottom:4px;">'+escapeHtml(d.block.title)+'</div>' : '';
+      return '<div class="card"><div class="footnote" style="margin-bottom:4px;">'+escapeHtml(t?t.name:'')+' · '+typeLabel(ex.type)+'</div>'+ctxLine+'<div class="body-text" style="font-weight:600; margin-bottom:6px;">'+escapeHtml(ex.prompt)+'</div><div class="footnote">Tu respuesta: <span style="color:var(--danger); font-weight:600;">'+escapeHtml(d.userAnswerLabel)+'</span></div><div class="footnote">Correcta: <span style="color:var(--success); font-weight:600;">'+escapeHtml(d.correctText)+'</span></div>'+((d.block && d.block.explanation)?'<div class="footnote" style="margin-top:6px;">'+escapeHtml(d.block.explanation)+'</div>':'')+'</div>';
     }).join('');
   }
 
@@ -1094,138 +1236,219 @@ function renderExamResult(){
 }
 
 /* ======================= EXERCISE RUNNER (shared: practice + exam) ======================= */
+function speakText(s){ return String(s||'').replace(/_{2,}/g,' blank '); }
+function speakBtnHtml(text){ return '<button type="button" class="speak-btn" data-speak="'+escapeHtml(speakText(text))+'">'+icon('speaker',16)+'</button>'; }
+
 function renderExerciseRunner(mode){
   const ctx = mode==='exam' ? state.exam : state.practice;
-  const ex = mode==='exam' ? ctx.questions[ctx.index] : ctx.current;
-  if(!ex){
-    return '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Nada más por aquí</h3><p>Añade más ejercicios para seguir practicando este tema.</p></div>';
-  }
-  const t = topicById(ex.topicId);
-  const ms = ex.type==='matching' ? ensureMatchingState(ctx, ex) : null;
-  const answered = mode==='exam' ? (ctx.answers[ex.id] !== undefined) : (ex.type==='matching' ? (ms.matchedLeft.size===ex.pairs.length) : ctx.answeredState);
+  const u = mode==='exam' ? ctx.units[ctx.index] : ctx.current;
+  const us = mode==='exam' ? ctx.states[u.key] : ctx.us;
+  const checked = mode==='practice' && us.checked;
   let html = '<div class="exercise-wrap">';
-
   if(mode==='exam'){
-    const pct = Math.round(((ctx.index)/ctx.questions.length)*100);
-    html += '<div class="session-meta"><span class="footnote">Pregunta '+(ctx.index+1)+' de '+ctx.questions.length+'</span><button class="text-action-btn danger" data-action="exam-finish-early">'+icon('close',15)+' Terminar</button></div>';
+    const pct = Math.round((ctx.index/ctx.units.length)*100);
+    html += '<div class="session-meta"><span class="footnote">Ejercicio '+(ctx.index+1)+' de '+ctx.units.length+'</span><button class="text-action-btn danger" data-action="exam-finish-early">'+icon('close',15)+' Terminar</button></div>';
     html += '<div class="progress-track"><div class="progress-fill" style="width:'+pct+'%;"></div></div>';
   } else {
     html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="practice-stop">'+icon('close',15)+' Terminar</button></div>';
   }
+  html += renderUnitCard(u, us, mode);
+  html += '</div>';
 
-  html += '<div class="exercise-card">';
-  html += '<div class="ex-card-header"><div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(ex.type)+'</div>'+
-    (mode==='practice' && ex.hint && !answered ? '<button type="button" class="help-btn" data-action="show-hint">'+icon('help',18)+'</button>' : '')+
-    '</div>';
-  html += '<div class="row-between" style="align-items:flex-start; gap:8px;"><div class="ex-question">'+escapeHtml(ex.prompt)+'</div>'+
-    (ex.type!=='matching' ? '<button type="button" class="speak-btn" data-speak="'+escapeHtml(ex.prompt)+'">'+icon('speaker',16)+'</button>' : '')+
-    '</div>';
-
-  if(ex.type==='multiple_choice'){
-    html += (ex.options||[]).map((opt,i)=>{
-      let cls='option-row';
-      if(mode==='practice' && answered){
-        if(i===ex.correctIndex) cls+=' correct';
-        else if(i===ctx.selected) cls+=' incorrect';
-      } else if(mode==='exam' && ctx.answers[ex.id]!==undefined && ctx.answers[ex.id]===i){
-        cls+=' selected';
-      }
-      return '<button class="'+cls+'" data-opt="'+i+'" '+((mode==='practice'&&answered)?'disabled':'')+'><span class="opt-letter">'+String.fromCharCode(65+i)+'</span><span>'+escapeHtml(opt)+'</span></button>';
-    }).join('');
-  } else if(ex.type==='true_false'){
-    let tCls='tf-btn', fCls='tf-btn';
-    if(mode==='practice' && answered){
-      if(ex.correctBool) tCls+=' correct'; else fCls+=' correct';
-      if(ctx.selected===true && !ex.correctBool) tCls+=' incorrect';
-      if(ctx.selected===false && ex.correctBool) fCls+=' incorrect';
-    }
-    html += '<div class="tf-row"><button class="'+tCls+'" data-tf="true" '+((mode==='practice'&&answered)?'disabled':'')+'>Verdadero</button><button class="'+fCls+'" data-tf="false" '+((mode==='practice'&&answered)?'disabled':'')+'>Falso</button></div>';
-  } else if(ex.type==='word_bank'){
-    const bank = ex.wordBank || [];
-    html += '<div class="chip-row" style="margin-top:14px;">' + bank.map(w=>{
-      let cls='bank-chip';
-      if(mode==='practice' && answered){
-        if(normalizeStr(w)===normalizeStr(ex.correctAnswer)) cls+=' correct';
-        else if(ctx.selected!=null && normalizeStr(String(ctx.selected))===normalizeStr(w)) cls+=' incorrect';
-      } else if(mode==='exam' && ctx.answers[ex.id]!==undefined && normalizeStr(ctx.answers[ex.id])===normalizeStr(w)){
-        cls+=' selected';
-      }
-      return '<button class="'+cls+'" data-bankword="'+escapeHtml(w)+'" '+((mode==='practice'&&answered)?'disabled':'')+'>'+escapeHtml(w)+'</button>';
-    }).join('') + '</div>';
-  } else if(ex.type==='matching'){
-    html += '<div class="match-grid">';
-    html += '<div class="match-col">' + ms.leftOrder.map((origIdx,pos)=>{
-      const matched = ms.matchedLeft.has(pos);
-      let cls='match-item';
-      if(matched) cls+=' matched'; else if(ms.selectedLeft===pos) cls+=' selected';
-      if(ms.wrongFlashLeft===pos) cls+=' wrong';
-      return '<button class="'+cls+'" data-match-left="'+pos+'" '+(matched?'disabled':'')+'>'+escapeHtml(ex.pairs[origIdx].left)+'</button>';
-    }).join('') + '</div>';
-    html += '<div class="match-col">' + ms.rightOrder.map((origIdx,pos)=>{
-      const matched = ms.matchedRight.has(pos);
-      let cls='match-item';
-      if(matched) cls+=' matched';
-      if(ms.wrongFlashRight===pos) cls+=' wrong';
-      return '<button class="'+cls+'" data-match-right="'+pos+'" '+(matched?'disabled':'')+'>'+escapeHtml(ex.pairs[origIdx].right)+'</button>';
-    }).join('') + '</div>';
-    html += '</div>';
-  } else {
-    const val = mode==='exam' ? (ctx.answers[ex.id]||'') : (ctx.textValue||'');
-    html += '<input type="text" class="input" id="free-answer-input" placeholder="Escribe tu respuesta" value="'+escapeHtml(val)+'" '+((mode==='practice'&&answered)?'disabled':'')+' style="margin-top:12px;" autocomplete="off" autocorrect="off" spellcheck="false">';
-  }
-
-  if(mode==='practice' && answered){
-    const isCorrect = ctx.lastCorrect;
-    let fbTitle;
-    if(ex.type==='matching') fbTitle = isCorrect ? '¡Perfecto, sin errores!' : 'Completado, pero con algún error';
-    else fbTitle = isCorrect ? '¡Correcto!' : 'No es correcto';
-    html += '<div class="feedback-box '+(isCorrect?'ok':'bad')+'">'+icon(isCorrect?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+fbTitle+'</div>'+(ex.explanation?escapeHtml(ex.explanation):'')+'</div></div>';
-  }
-  html += '</div></div>';
-
-  // sticky action bar
-  let sticky = '';
+  let actions = '';
   if(mode==='practice'){
-    if(ex.type==='matching' && !answered){
-      // sin botón: se responde interactuando directamente con la cuadrícula
-    } else if(!answered){
-      const needsCheck = ex.type==='fill_blank' || ex.type==='translation';
-      if(needsCheck) sticky = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
+    if(!checked){
+      if(!unitAutoCheck(u)) actions = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
     } else {
-      sticky = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
+      actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
     }
   } else {
-    const isLast = ctx.index === ctx.questions.length-1;
-    sticky = '<div class="btn-block-row">';
-    if(ctx.index>0) sticky += '<button class="btn btn-secondary" data-action="exam-prev" style="flex:0 0 90px;">Atrás</button>';
-    sticky += '<button class="btn btn-primary" data-action="'+(isLast?'exam-submit':'exam-next')+'">'+(isLast?'Finalizar examen':'Siguiente')+'</button>';
-    sticky += '</div>';
+    const isLast = ctx.index === ctx.units.length-1;
+    actions = '<div class="btn-block-row">';
+    if(ctx.index>0) actions += '<button class="btn btn-secondary" data-action="exam-prev" style="flex:0 0 90px;">Atrás</button>';
+    actions += '<button class="btn btn-primary" data-action="'+(isLast?'exam-submit':'exam-next')+'">'+(isLast?'Finalizar examen':'Siguiente')+'</button></div>';
   }
-  if(sticky) html += '<div class="sticky-actions">'+sticky+'</div>';
-
+  if(actions) html += '<div class="sticky-actions">'+actions+'</div>';
   return html;
 }
-function ensureMatchingState(ctx, ex){
-  if(!ctx.matchingState || ctx.matchingState.exId !== ex.id){
-    const n = ex.pairs.length;
-    const leftOrder = shuffleArray([...Array(n).keys()]);
-    const rightOrder = shuffleArray([...Array(n).keys()]);
-    ctx.matchingState = {exId:ex.id, leftOrder, rightOrder, matchedLeft:new Set(), matchedRight:new Set(), selectedLeft:null, wrongFlashLeft:null, wrongFlashRight:null, wrongAttempts:0};
+
+function renderUnitCard(u, us, mode){
+  const t = topicById(u.topicId);
+  const b = u.block;
+  const checked = mode==='practice' && us.checked;
+  let html = '<div class="exercise-card">';
+  html += '<div class="ex-card-header"><div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(u.kind)+'</div>'+
+    (mode==='practice' && b.hint && !checked ? '<button type="button" class="help-btn" data-action="show-hint">'+icon('help',18)+'</button>' : '')+'</div>';
+  if(b.title){
+    html += '<div class="row-between" style="align-items:flex-start; gap:8px; margin-bottom:6px;"><div class="ex-title">'+escapeHtml(b.title)+'</div>'+speakBtnHtml(b.title)+'</div>';
   }
-  return ctx.matchingState;
+  html += renderUnitItems(u, us, checked);
+  if(checked){
+    const ok = us.results.filter(Boolean).length, n = us.results.length;
+    const all = ok===n;
+    html += '<div class="feedback-box '+(all?'ok':'bad')+'">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(n>1 ? ok+' de '+n+' correctas' : (all?'¡Correcto!':'No es correcto'))+'</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderUnitItems(u, us, checked){
+  if(ASSIGN_KINDS.includes(u.kind)) return renderAssignBoard(u, us, checked);
+  const multi = u.items.length>1;
+  const k = u.kind;
+  return '<div class="unit-items">' + u.items.map((ex,i)=>{
+    const num = multi ? '<span class="unit-num">'+(i+1)+'.</span>' : '';
+    const okCls = checked ? (us.results[i] ? 'correct' : 'incorrect') : '';
+    let body = '';
+    if(k==='fill_blank' || k==='translation'){
+      const val = us.answers[i]==null ? '' : us.answers[i];
+      const inp = (extra)=>'<input type="text" class="inline-input '+extra+' '+okCls+'" data-unit-input="'+i+'" value="'+escapeHtml(val)+'" '+(checked?'disabled':'')+' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Respuesta '+(i+1)+'">';
+      const m = k==='fill_blank' ? ex.prompt.match(/_{2,}/) : null;
+      if(m){ body = escapeHtml(ex.prompt.slice(0,m.index)) + inp('') + escapeHtml(ex.prompt.slice(m.index+m[0].length)); }
+      else { body = escapeHtml(ex.prompt) + inp('block-input'); }
+      if(checked && !us.results[i]) body += '<div class="unit-correct">✓ '+escapeHtml(correctLabel(ex))+'</div>';
+    } else if(k==='true_false'){
+      const sel = us.answers[i];
+      body = '<div>'+escapeHtml(ex.prompt)+'</div><div class="tf-row">' + [true,false].map(v=>{
+        let c = 'tf-btn';
+        if(checked){ if(v===ex.correctBool) c += ' correct'; else if(sel===v) c += ' incorrect'; }
+        else if(sel===v) c += ' selected';
+        return '<button type="button" class="'+c+'" data-tf="'+i+':'+v+'" '+(checked?'disabled':'')+'>'+(v?'Verdadero':'Falso')+'</button>';
+      }).join('') + '</div>';
+    } else if(k==='multiple_choice'){
+      const sel = us.answers[i];
+      body = '<div>'+escapeHtml(ex.prompt)+'</div>' + ex.options.map((opt,j)=>{
+        let c = 'option-row';
+        if(checked){ if(j===ex.correctIndex) c += ' correct'; else if(sel===j) c += ' incorrect'; }
+        else if(sel===j) c += ' selected';
+        return '<button type="button" class="'+c+'" data-mc="'+i+':'+j+'" '+(checked?'disabled':'')+'><span class="opt-letter">'+String.fromCharCode(65+j)+'</span><span>'+escapeHtml(opt)+'</span></button>';
+      }).join('');
+    }
+    return '<div class="unit-item'+(multi?'':' single')+'"><div class="unit-head"><div class="unit-prompt'+(multi?'':' ex-question')+'">'+num+body+'</div>'+speakBtnHtml(ex.prompt)+'</div></div>';
+  }).join('') + '</div>';
+}
+
+// Tablero de arrastrar: sirve para "Unir" (palabra -> definición) y "Banco de palabras" (palabra -> hueco).
+function renderAssignBoard(u, us, checked){
+  const isWB = u.kind==='word_bank';
+  const slotHtml = (i)=>{
+    const ci = us.placed[i];
+    let cls = 'assign-slot';
+    if(ci!=null) cls += ' filled';
+    if(checked) cls += us.results[i] ? ' correct' : ' incorrect';
+    const chip = ci!=null ? '<span class="assign-chip in-slot" data-chip="'+ci+'" data-from="'+i+'">'+escapeHtml(us.pool[ci])+'</span>' : '<span class="assign-empty"></span>';
+    return '<span class="'+cls+'" data-slot="'+i+'">'+chip+'</span>';
+  };
+  let html = '<div class="assign-board" data-assign><div class="assign-slots">';
+  u.items.forEach((ex,i)=>{
+    const num = '<span class="unit-num">'+(i+1)+'.</span>';
+    let row;
+    if(isWB){
+      const m = ex.prompt.match(/_{2,}/);
+      const idx = m ? m.index : ex.prompt.length;
+      const len = m ? m[0].length : 0;
+      row = '<div class="assign-row">'+num+escapeHtml(ex.prompt.slice(0,idx))+slotHtml(i)+escapeHtml(ex.prompt.slice(idx+len))+'</div>';
+    } else {
+      row = '<div class="assign-row match"><div class="assign-label">'+num+escapeHtml(ex.prompt)+'</div>'+slotHtml(i)+'</div>';
+    }
+    if(checked && !us.results[i]) row += '<div class="unit-correct assign-fix">✓ '+escapeHtml(ex.correctAnswer)+'</div>';
+    html += row;
+  });
+  html += '</div>';
+  if(!checked){
+    const free = us.pool.map((w,k)=>({w:w,k:k})).filter(o=>!us.placed.includes(o.k));
+    html += '<div class="assign-pool">' + (free.length
+      ? free.map(o=>'<span class="assign-chip'+(us.armed===o.k?' armed':'')+'" data-chip="'+o.k+'">'+escapeHtml(o.w)+'</span>').join('')
+      : '<span class="footnote">Todas las palabras están colocadas</span>') + '</div>';
+    html += '<div class="footnote" style="margin-top:8px;">Arrastra cada palabra a su sitio (o tócala y luego toca el hueco).</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function placeChip(us, chip, slot){
+  for(let s=0;s<us.placed.length;s++){ if(us.placed[s]===chip) us.placed[s] = null; }
+  us.placed[slot] = chip;
+  us.armed = null;
+}
+
+// Arrastre con eventos de puntero (funciona igual con dedo y con ratón).
+function wireAssignBoard(us, locked, onChange){
+  const board = document.querySelector('[data-assign]');
+  if(!board || locked) return;
+  board.addEventListener('pointerdown', (e)=>{
+    if(e.pointerType==='mouse' && e.button!==0) return;
+    const chipEl = e.target.closest('[data-chip]');
+    const slotEl = e.target.closest('[data-slot]');
+    if(!chipEl){
+      if(slotEl){
+        const si = Number(slotEl.getAttribute('data-slot'));
+        if(us.armed!=null){ placeChip(us, us.armed, si); onChange(); }
+      }
+      return;
+    }
+    e.preventDefault();
+    startAssignDrag(e, chipEl, us, onChange);
+  });
+}
+
+function startAssignDrag(e, chipEl, us, onChange){
+  const chip = Number(chipEl.getAttribute('data-chip'));
+  const fromAttr = chipEl.getAttribute('data-from');
+  const fromSlot = fromAttr!=null ? Number(fromAttr) : null;
+  const startX = e.clientX, startY = e.clientY;
+  const rect = chipEl.getBoundingClientRect();
+  const offX = startX - rect.left, offY = startY - rect.top;
+  let ghost = null, moved = false, overEl = null;
+
+  const slotAt = (x,y)=>{ const el = document.elementFromPoint(x,y); return el ? el.closest('[data-slot]') : null; };
+  function cleanup(){
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    if(ghost) ghost.remove();
+    if(overEl) overEl.classList.remove('over');
+    chipEl.classList.remove('dragging');
+  }
+  function onMove(ev){
+    if(ev.pointerId!==e.pointerId) return;
+    if(!moved){
+      if(Math.hypot(ev.clientX-startX, ev.clientY-startY) < 7) return;
+      moved = true;
+      ghost = document.createElement('div');
+      ghost.className = 'drag-ghost';
+      ghost.textContent = chipEl.textContent;
+      ghost.style.width = Math.max(rect.width, 60) + 'px';
+      document.body.appendChild(ghost);
+      chipEl.classList.add('dragging');
+    }
+    ev.preventDefault();
+    ghost.style.transform = 'translate('+(ev.clientX-offX)+'px,'+(ev.clientY-offY)+'px) scale(1.06)';
+    const s = slotAt(ev.clientX, ev.clientY);
+    if(s!==overEl){ if(overEl) overEl.classList.remove('over'); overEl = s; if(overEl) overEl.classList.add('over'); }
+  }
+  function onUp(ev){
+    if(ev.pointerId!==e.pointerId) return;
+    const target = moved ? slotAt(ev.clientX, ev.clientY) : null;
+    cleanup();
+    if(moved){
+      if(target){ placeChip(us, chip, Number(target.getAttribute('data-slot'))); }
+      else if(fromSlot!=null){ us.placed[fromSlot] = null; }
+    } else if(fromSlot==null){
+      us.armed = (us.armed===chip) ? null : chip;
+    } else if(us.armed!=null && us.armed!==chip){
+      placeChip(us, us.armed, fromSlot);
+    } else {
+      us.placed[fromSlot] = null;
+    }
+    onChange();
+  }
+  function onCancel(ev){ if(ev.pointerId===e.pointerId) cleanup(); }
+  window.addEventListener('pointermove', onMove, {passive:false});
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
 }
 function shuffleArray(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
-function finishMatchingExercise(){
-  const ctx = state.practice; const ex = ctx.current; const ms = ctx.matchingState;
-  const isCorrect = ms.wrongAttempts === 0;
-  ctx.answeredState = true; ctx.lastCorrect = isCorrect;
-  ctx.sessionTotal++;
-  if(isCorrect){ ctx.sessionCorrect++; ctx.sessionCurrentStreak++; ctx.sessionBestStreak=Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak); }
-  else { ctx.sessionCurrentStreak = 0; }
-  recordAnswer(ex, isCorrect);
-  beep(isCorrect?880:220, isCorrect?140:220);
-  render();
-}
 
 /* ======================= VOCAB ======================= */
 function renderVocab(){
@@ -1271,8 +1494,8 @@ function renderContent(){
       html += '<div class="empty-state"><div class="es-icon">📚</div><h3 class="title3">Crea tu primer tema</h3><p>Por ejemplo: Presente Simple, To Have, Presente Continuo...</p></div>';
     } else {
       html += '<div class="list">' + DATA.topics.map(t=>{
-        const exCount = DATA.exercises.filter(e=>e.topicId===t.id).length;
-        return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+exCount+' ejercicios</div></div><div class="lr-icons"><button class="icon-btn" data-edit-topic="'+t.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-topic="'+t.id+'">'+icon('trash',16)+'</button></div></div>';
+        const bl = DATA.blocks.filter(b=>b.topicId===t.id).length;
+        return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(t.name)+'</div><div class="lr-sub">'+categoryLabel(topicCategory(t))+' · '+bl+' ejercicio'+(bl===1?'':'s')+'</div></div><div class="lr-icons"><button class="icon-btn" data-edit-topic="'+t.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-topic="'+t.id+'">'+icon('trash',16)+'</button></div></div>';
       }).join('') + '</div>';
     }
     html += '<button class="fab" data-action="add-topic">'+icon('plus',26)+'</button>';
@@ -1284,16 +1507,17 @@ function renderContent(){
     } else {
       html += '<div class="chip-row" id="content-topic-chips"><button class="chip '+(state.contentFilterTopic==='all'?'active':'')+'" data-ctopic="all">Todos</button>';
       html += DATA.topics.map(t=>'<button class="chip '+(state.contentFilterTopic===t.id?'active':'')+'" data-ctopic="'+t.id+'">'+escapeHtml(t.name)+'</button>').join('') + '</div>';
-      let list = state.contentFilterTopic==='all' ? DATA.exercises : DATA.exercises.filter(e=>e.topicId===state.contentFilterTopic);
+      const list = state.contentFilterTopic==='all' ? DATA.blocks : DATA.blocks.filter(b=>b.topicId===state.contentFilterTopic);
       if(list.length===0){
-        html += '<div class="empty-state"><div class="es-icon">✍️</div><h3 class="title3">Sin ejercicios</h3><p>Añade el primero con el botón +.</p></div>';
+        html += '<div class="empty-state"><div class="es-icon">✍️</div><h3 class="title3">Sin ejercicios</h3><p>Un ejercicio agrupa varias preguntas, igual que en tu libro. Añade el primero con el botón +.</p></div>';
       } else {
-        html += '<div class="list">' + list.map(e=>{
-          const t = topicById(e.topicId);
-          return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(e.prompt)+'</div><div class="lr-sub">'+escapeHtml(t?t.name:'')+' · '+typeLabel(e.type)+'</div></div><div class="lr-icons"><button class="icon-btn" data-edit-ex="'+e.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-ex="'+e.id+'">'+icon('trash',16)+'</button></div></div>';
+        html += '<div class="list">' + list.map(b=>{
+          const t = topicById(b.topicId);
+          const n = itemsOfBlock(b).length;
+          return '<div class="list-row"><div class="lr-main"><div class="lr-title">'+escapeHtml(blockTitle(b))+'</div><div class="lr-sub">'+escapeHtml(t?t.name:'')+' · '+typeLabel(b.kind)+' · '+n+' pregunta'+(n===1?'':'s')+'</div></div><div class="lr-icons"><button class="icon-btn" data-edit-block="'+b.id+'">'+icon('edit',16)+'</button><button class="icon-btn danger" data-del-block="'+b.id+'">'+icon('trash',16)+'</button></div></div>';
         }).join('') + '</div>';
       }
-      html += '<button class="fab" data-action="add-exercise">'+icon('plus',26)+'</button>';
+      html += '<button class="fab" data-action="add-block">'+icon('plus',26)+'</button>';
     }
   }
 
@@ -1395,114 +1619,112 @@ function modalHeader(title){
 
 function openTopicModal(id){
   const t = id ? topicById(id) : null;
+  const cat = t ? (t.category||'grammar') : 'grammar';
   const header = modalHeader(t?'Editar tema':'Nuevo tema');
   const body =
+    '<div class="field"><label>Categoría</label><div class="segmented" id="m-topic-category"><button type="button" data-topiccat="grammar" class="'+(cat==='grammar'?'active':'')+'">Gramática</button><button type="button" data-topiccat="vocabulary" class="'+(cat==='vocabulary'?'active':'')+'">Vocabulario</button></div></div>' +
     '<div class="field"><label>Nombre del tema</label><input type="text" class="input" id="m-topic-name" placeholder="Presente Simple" value="'+(t?escapeHtml(t.name):'')+'"></div>' +
     '<div class="field"><label>Apuntes de gramática (opcional)</label><textarea class="textarea" id="m-topic-notes" placeholder="Explica la regla, ejemplos, usa **negrita** o líneas con - para listas...">'+(t?escapeHtml(t.grammarNotes||''):'')+'</textarea></div>';
   const footer = '<button class="btn btn-primary" data-action="save-topic" data-id="'+(t?t.id:'')+'">Guardar</button>';
   openModal(header, body, footer);
+  document.querySelectorAll('[data-topiccat]').forEach(b=>{
+    b.onclick = ()=>{ document.querySelectorAll('[data-topiccat]').forEach(x=>x.classList.remove('active')); b.classList.add('active'); };
+  });
 }
-function openExerciseModal(id){
-  const e = id ? exById(id) : null;
-  const type = e ? e.type : 'multiple_choice';
-  const header = modalHeader(e?'Editar ejercicio':'Nuevo ejercicio');
-  let body = '<div class="field"><label>Tema</label><select class="select" id="m-ex-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+(e&&e.topicId===t.id?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
-  body += '<div class="field"><label>Tipo de ejercicio</label><select class="select" id="m-ex-type">' +
-    ['multiple_choice','fill_blank','true_false','translation','matching','word_bank'].map(tp=>'<option value="'+tp+'" '+(type===tp?'selected':'')+'>'+typeLabel(tp)+'</option>').join('') + '</select></div>';
-  body += '<div class="field"><label>Enunciado / instrucción</label><textarea class="textarea" id="m-ex-prompt" placeholder="Ej: She ___ to school every day. (go)">'+(e?escapeHtml(e.prompt):'')+'</textarea><div class="hint-text">Para "rellenar hueco" y "banco de palabras" usa ___ donde va la respuesta. Para "emparejar" úsalo como instrucción general (ej: "Relaciona cada palabra con su definición").</div></div>';
-  body += '<div id="m-ex-type-fields">' + renderExerciseTypeFields(type, e) + '</div>';
-  body += '<div class="field"><label>Pista (opcional)</label><input type="text" class="input" id="m-ex-hint" value="'+(e?escapeHtml(e.hint||''):'')+'" placeholder="Consejo para resolverlo"></div>';
-  body += '<div class="field"><label>Explicación (se muestra tras responder)</label><textarea class="textarea" id="m-ex-explanation" placeholder="Por qué es correcta esta respuesta...">'+(e?escapeHtml(e.explanation||''):'')+'</textarea></div>';
-  const footer = '<button class="btn btn-primary" data-action="save-exercise" data-id="'+(e?e.id:'')+'">Guardar</button>';
+const KIND_FORMAT = {
+  fill_blank:{hint:'Una pregunta por línea: frase con ___ | respuesta. Si hay varias respuestas válidas, sepáralas con comas.', ph:"She ___ a teacher. | is\nWe ___ at the park now. | aren't, are not\n___ you from Spain? | Are"},
+  translation:{hint:'Una pregunta por línea: enunciado | respuesta. Varias respuestas válidas separadas por comas.', ph:"(The weather / very cold today) | The weather is very cold today.\n(My parents / not at home) | My parents aren't at home."},
+  true_false:{hint:'Una afirmación por línea: afirmación | verdadero (o falso).', ph:"The motherboard stores data permanently. | falso\nThe RAM is temporary memory. | verdadero"},
+  multiple_choice:{hint:'Separa cada pregunta con una línea en blanco. Primera línea = pregunta; las siguientes = opciones. Marca la correcta con * al principio.', ph:"What is the brain of the computer?\nRAM\n*CPU\nHard drive\n\nWhich device is an input device?\nMonitor\n*Keyboard\nSpeaker"},
+  matching:{hint:'Una pareja por línea: palabra | definición o traducción. Arrastrarás cada palabra sobre su significado.', ph:"Laptop | A portable computer you can carry with you\nTablet | A flat portable device with a touchscreen"},
+  word_bank:{hint:'Una frase por línea: frase con ___ | palabra correcta. El banco se forma con las palabras correctas (más los distractores opcionales).', ph:"The ___ is the brain of the computer. | CPU\nThe ___ stores your files permanently. | hard drive"}
+};
+
+function parseBlockItems(kind, text){
+  const items = [], errors = [];
+  const raw = String(text||'').replace(/\r/g,'').trim();
+  if(!raw) return {items:items, errors:['Añade al menos una pregunta']};
+  if(kind==='multiple_choice'){
+    raw.split(/\n\s*\n/).forEach((chunk,ci)=>{
+      const lines = chunk.split('\n').map(l=>l.trim()).filter(Boolean);
+      if(lines.length<3){ errors.push('Pregunta '+(ci+1)+': necesita enunciado y al menos 2 opciones'); return; }
+      const opts = []; let correct = -1;
+      lines.slice(1).forEach(l=>{
+        if(l.charAt(0)==='*'){ correct = opts.length; opts.push(l.slice(1).trim()); } else { opts.push(l); }
+      });
+      if(correct<0){ errors.push('Pregunta '+(ci+1)+': marca la opción correcta con *'); return; }
+      items.push({type:'multiple_choice', prompt:lines[0], options:opts, correctIndex:correct});
+    });
+    return {items:items, errors:errors};
+  }
+  raw.split('\n').map(l=>l.trim()).filter(Boolean).forEach((line,li)=>{
+    const idx = line.lastIndexOf('|');
+    if(idx<0){ errors.push('Línea '+(li+1)+': falta el separador |'); return; }
+    const left = line.slice(0,idx).trim(), right = line.slice(idx+1).trim();
+    if(!left || !right){ errors.push('Línea '+(li+1)+': completa los dos lados del |'); return; }
+    if(kind==='true_false'){
+      const v = normalizeStr(right);
+      if(['verdadero','true','v','t','cierto'].includes(v)) items.push({type:kind, prompt:left, correctBool:true});
+      else if(['falso','false','f'].includes(v)) items.push({type:kind, prompt:left, correctBool:false});
+      else errors.push('Línea '+(li+1)+': escribe verdadero o falso');
+    } else if(kind==='fill_blank' || kind==='translation'){
+      items.push({type:kind, prompt:left, acceptedAnswers:right.split(',').map(s=>s.trim()).filter(Boolean)});
+    } else if(kind==='word_bank'){
+      if(!/_{2,}/.test(left)){ errors.push('Línea '+(li+1)+': la frase necesita ___ para el hueco'); return; }
+      items.push({type:kind, prompt:left, correctAnswer:right});
+    } else if(kind==='matching'){
+      items.push({type:'matching', prompt:right, correctAnswer:left});
+    }
+  });
+  return {items:items, errors:errors};
+}
+
+function serializeItems(kind, items){
+  if(!items.length) return '';
+  if(kind==='multiple_choice'){
+    return items.map(it=>it.prompt+'\n'+it.options.map((o,j)=>(j===it.correctIndex?'*':'')+o).join('\n')).join('\n\n');
+  }
+  return items.map(it=>{
+    if(kind==='true_false') return it.prompt+' | '+(it.correctBool?'verdadero':'falso');
+    if(kind==='word_bank') return it.prompt+' | '+it.correctAnswer;
+    if(kind==='matching') return it.correctAnswer+' | '+it.prompt;
+    return it.prompt+' | '+(it.acceptedAnswers||[]).join(', ');
+  }).join('\n');
+}
+
+function updateBlockCount(){
+  const kindSel = document.getElementById('m-blk-kind'), ta = document.getElementById('m-blk-items'), el = document.getElementById('m-blk-count');
+  if(!kindSel || !ta || !el) return;
+  if(!ta.value.trim()){ el.textContent = '0 preguntas'; el.style.color = 'var(--text-tertiary)'; return; }
+  const r = parseBlockItems(kindSel.value, ta.value);
+  el.textContent = r.items.length+' pregunta'+(r.items.length===1?'':'s')+(r.errors.length ? ' · '+r.errors[0] : '');
+  el.style.color = r.errors.length ? 'var(--danger)' : 'var(--success)';
+}
+
+function openBlockModal(id){
+  const b = id ? blockById(id) : null;
+  const kind = b ? b.kind : 'fill_blank';
+  const items = b ? itemsOfBlock(b) : [];
+  const header = modalHeader(b ? 'Editar ejercicio' : 'Nuevo ejercicio');
+  let body = '<div class="field"><label>Tema</label><select class="select" id="m-blk-topic">' + DATA.topics.map(t=>'<option value="'+t.id+'" '+((b ? b.topicId===t.id : state.contentFilterTopic===t.id)?'selected':'')+'>'+escapeHtml(t.name)+'</option>').join('') + '</select></div>';
+  body += '<div class="field"><label>Tipo de ejercicio</label><select class="select" id="m-blk-kind">' + Object.keys(KIND_META).map(k=>'<option value="'+k+'" '+(k===kind?'selected':'')+'>'+typeLabel(k)+'</option>').join('') + '</select></div>';
+  body += '<div class="field"><label>Enunciado del ejercicio</label><input type="text" class="input" id="m-blk-title" value="'+escapeHtml(b?b.title:'')+'" placeholder="Completa los huecos con el verbo To Be"></div>';
+  body += '<div class="field"><label>Preguntas</label><textarea class="textarea code-area" id="m-blk-items" spellcheck="false" autocapitalize="off" placeholder="'+escapeHtml(KIND_FORMAT[kind].ph)+'">'+escapeHtml(serializeItems(kind, items))+'</textarea><div class="hint-text" id="m-blk-format">'+escapeHtml(KIND_FORMAT[kind].hint)+'</div><div class="hint-text" id="m-blk-count" style="font-weight:700;"></div></div>';
+  body += '<div class="field" id="m-blk-extra-field" style="'+(kind==='word_bank'?'':'display:none;')+'"><label>Palabras extra del banco (distractores, opcional)</label><input type="text" class="input" id="m-blk-extra" value="'+escapeHtml(((b&&b.extraWords)||[]).join(', '))+'" placeholder="motherboard, cable"></div>';
+  body += '<div class="field"><label>Pista (opcional)</label><input type="text" class="input" id="m-blk-hint" value="'+escapeHtml(b?b.hint||'':'')+'" placeholder="Consejo para resolver el ejercicio"></div>';
+  body += '<div class="field"><label>Explicación (se muestra al comprobar)</label><textarea class="textarea" id="m-blk-explanation" placeholder="Por qué son correctas estas respuestas...">'+escapeHtml(b?b.explanation||'':'')+'</textarea></div>';
+  const footer = '<button class="btn btn-primary" data-action="save-block" data-id="'+(b?b.id:'')+'">Guardar</button>';
   openModal(header, body, footer);
-  document.getElementById('m-ex-type').addEventListener('change', (ev)=>{
-    document.getElementById('m-ex-type-fields').innerHTML = renderExerciseTypeFields(ev.target.value, null);
-    wireExerciseTypeFieldEvents();
+  const kindSel = document.getElementById('m-blk-kind'), ta = document.getElementById('m-blk-items');
+  kindSel.addEventListener('change', ()=>{
+    const k = kindSel.value;
+    document.getElementById('m-blk-format').textContent = KIND_FORMAT[k].hint;
+    ta.placeholder = KIND_FORMAT[k].ph;
+    document.getElementById('m-blk-extra-field').style.display = k==='word_bank' ? '' : 'none';
+    updateBlockCount();
   });
-  wireExerciseTypeFieldEvents();
-}
-function renderExerciseTypeFields(type, e){
-  if(type==='multiple_choice'){
-    const opts = (e&&e.options)||['','',''];
-    let html = '<div class="field"><label>Opciones (marca la correcta)</label><div id="mc-options">';
-    html += opts.map((o,i)=>'<div class="option-edit-row"><input type="radio" name="mc-correct" value="'+i+'" '+(e&&e.correctIndex===i?'checked':(!e&&i===0?'checked':''))+'><input type="text" class="input" data-mc-opt value="'+escapeHtml(o)+'" placeholder="Opción '+(i+1)+'"><button type="button" class="icon-btn danger" data-remove-opt>'+icon('close',14)+'</button></div>').join('');
-    html += '</div><button type="button" class="text-action-btn" style="margin-top:2px;" data-action="add-mc-opt">'+icon('plus',15)+' Añadir opción</button></div>';
-    return html;
-  }
-  if(type==='fill_blank' || type==='translation'){
-    const accepted = e && e.acceptedAnswers ? e.acceptedAnswers.join(', ') : '';
-    return '<div class="field"><label>Respuesta(s) correcta(s)</label><input type="text" class="input" id="m-ex-accepted" value="'+escapeHtml(accepted)+'" placeholder="respuesta, alternativa2, alternativa3"><div class="hint-text">Separa varias respuestas válidas con comas.</div></div>';
-  }
-  if(type==='true_false'){
-    const val = e ? e.correctBool : true;
-    return '<div class="field"><label>Respuesta correcta</label><div class="segmented"><button type="button" class="'+(val?'active':'')+'" data-tfcorrect="true">Verdadero</button><button type="button" class="'+(!val?'active':'')+'" data-tfcorrect="false">Falso</button></div></div>';
-  }
-  if(type==='matching'){
-    const pairs = (e&&e.pairs&&e.pairs.length) ? e.pairs : [{left:'',right:''},{left:'',right:''}];
-    let html = '<div class="field"><label>Pares a relacionar (palabra / traducción o definición)</label><div id="matching-pairs">';
-    html += pairs.map(p=>'<div class="option-edit-row"><input type="text" class="input" data-pair-left value="'+escapeHtml(p.left||'')+'" placeholder="Palabra" style="flex:1;"><input type="text" class="input" data-pair-right value="'+escapeHtml(p.right||'')+'" placeholder="Traducción / definición" style="flex:1;"><button type="button" class="icon-btn danger" data-remove-pair>'+icon('close',14)+'</button></div>').join('');
-    html += '</div><button type="button" class="text-action-btn" style="margin-top:2px;" data-action="add-pair">'+icon('plus',15)+' Añadir par</button></div>';
-    return html;
-  }
-  if(type==='word_bank'){
-    const bankWords = (e&&e.wordBank) ? e.wordBank.join(', ') : '';
-    const correct = e ? escapeHtml(e.correctAnswer||'') : '';
-    let html = '<div class="field"><label>Banco de palabras (todas las opciones)</label><input type="text" class="input" id="m-ex-wordbank" value="'+escapeHtml(bankWords)+'" placeholder="CPU, RAM, Motherboard, Heat sink"><div class="hint-text">La palabra correcta más 2-4 distractores, separados por comas. Usa ___ en el enunciado para marcar el hueco.</div></div>';
-    html += '<div class="field"><label>Palabra correcta</label><input type="text" class="input" id="m-ex-wordbank-correct" value="'+correct+'" placeholder="CPU"><div class="hint-text">Debe coincidir exactamente con una de las palabras del banco.</div></div>';
-    return html;
-  }
-  return '';
-}
-function wireExerciseTypeFieldEvents(){
-  const addBtn = document.querySelector('[data-action="add-mc-opt"]');
-  if(addBtn){
-    addBtn.onclick = ()=>{
-      const wrap = document.getElementById('mc-options');
-      const idx = wrap.children.length;
-      const div = document.createElement('div');
-      div.className='option-edit-row';
-      div.innerHTML = '<input type="radio" name="mc-correct" value="'+idx+'"><input type="text" class="input" data-mc-opt placeholder="Opción '+(idx+1)+'"><button type="button" class="icon-btn danger" data-remove-opt>'+icon('close',14)+'</button>';
-      wrap.appendChild(div);
-      wireRemoveOptButtons();
-    };
-  }
-  wireRemoveOptButtons();
-  document.querySelectorAll('[data-tfcorrect]').forEach(btn=>{
-    btn.onclick = ()=>{
-      document.querySelectorAll('[data-tfcorrect]').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-    };
-  });
-  const addPairBtn = document.querySelector('[data-action="add-pair"]');
-  if(addPairBtn){
-    addPairBtn.onclick = ()=>{
-      const wrap = document.getElementById('matching-pairs');
-      const div = document.createElement('div');
-      div.className='option-edit-row';
-      div.innerHTML = '<input type="text" class="input" data-pair-left placeholder="Palabra" style="flex:1;"><input type="text" class="input" data-pair-right placeholder="Traducción / definición" style="flex:1;"><button type="button" class="icon-btn danger" data-remove-pair>'+icon('close',14)+'</button>';
-      wrap.appendChild(div);
-      wireRemovePairButtons();
-    };
-  }
-  wireRemovePairButtons();
-}
-function wireRemoveOptButtons(){
-  document.querySelectorAll('[data-remove-opt]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const wrap = document.getElementById('mc-options');
-      if(wrap.children.length>2) btn.closest('.option-edit-row').remove();
-      else showToast('⚠️','Mínimo dos opciones','');
-    };
-  });
-}
-function wireRemovePairButtons(){
-  document.querySelectorAll('[data-remove-pair]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const wrap = document.getElementById('matching-pairs');
-      if(wrap.children.length>2) btn.closest('.option-edit-row').remove();
-      else showToast('⚠️','Mínimo dos pares','');
-    };
-  });
+  ta.addEventListener('input', updateBlockCount);
+  updateBlockCount();
 }
 function openVocabModal(id){
   const v = id ? DATA.vocabulary.find(x=>x.id===id) : null;
@@ -1593,10 +1815,16 @@ function afterRender(){
   // study
   document.querySelectorAll('[data-study-topic]').forEach(r=>{ r.onclick=()=>{ state.studyTopicId = r.getAttribute('data-study-topic'); render(); }; });
   const back = document.querySelector('[data-action="study-back"]'); if(back) back.onclick=()=>{ state.studyTopicId=null; render(); };
-  document.querySelectorAll('[data-practice-topic]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession(btn.getAttribute('data-practice-topic')); }; });
-  const practiceGlobalBtn = document.querySelector('[data-action="practice-global"]'); if(practiceGlobalBtn) practiceGlobalBtn.onclick=()=>{ startPracticeSession('all'); };
+  document.querySelectorAll('[data-scat]').forEach(c=>{ c.onclick=()=>{ state.studyCategory = c.getAttribute('data-scat'); render(); }; });
+  document.querySelectorAll('[data-practice-topic]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({topicId:btn.getAttribute('data-practice-topic')}); }; });
+  document.querySelectorAll('[data-practice-block]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({blockId:btn.getAttribute('data-practice-block')}); }; });
+  document.querySelectorAll('[data-practice-kind]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({kind:btn.getAttribute('data-practice-kind'), category:state.studyCategory}); }; });
+  const practiceGlobalBtn = document.querySelector('[data-action="practice-global"]'); if(practiceGlobalBtn) practiceGlobalBtn.onclick=()=>{ startPracticeSession({category:state.studyCategory}); };
 
   // exam setup
+  document.querySelectorAll('[data-ecat]').forEach(chip=>{
+    chip.onclick=()=>{ examConfig.category = chip.getAttribute('data-ecat'); examConfig.topics = ['all']; render(); };
+  });
   document.querySelectorAll('[data-ecount]').forEach(chip=>{
     chip.onclick=()=>{ document.querySelectorAll('[data-ecount]').forEach(c=>c.classList.remove('active')); chip.classList.add('active'); examConfig.count = chip.getAttribute('data-ecount')==='all' ? 'all' : Number(chip.getAttribute('data-ecount')); };
   });
@@ -1632,9 +1860,9 @@ function afterRender(){
   document.querySelectorAll('[data-edit-topic]').forEach(b=>{ b.onclick=()=>openTopicModal(b.getAttribute('data-edit-topic')); });
   document.querySelectorAll('[data-del-topic]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-topic'); showConfirm('¿Eliminar este tema y todos sus ejercicios y vocabulario asociados?','Eliminar',true).then(ok=>{ if(ok) deleteTopic(id); }); }; });
 
-  const addExBtn = document.querySelector('[data-action="add-exercise"]'); if(addExBtn) addExBtn.onclick=()=>openExerciseModal(null);
-  document.querySelectorAll('[data-edit-ex]').forEach(b=>{ b.onclick=()=>openExerciseModal(b.getAttribute('data-edit-ex')); });
-  document.querySelectorAll('[data-del-ex]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-ex'); showConfirm('¿Eliminar este ejercicio?','Eliminar',true).then(ok=>{ if(ok) deleteExercise(id); }); }; });
+  const addBlkBtn = document.querySelector('[data-action="add-block"]'); if(addBlkBtn) addBlkBtn.onclick=()=>openBlockModal(null);
+  document.querySelectorAll('[data-edit-block]').forEach(b=>{ b.onclick=()=>openBlockModal(b.getAttribute('data-edit-block')); });
+  document.querySelectorAll('[data-del-block]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-block'); showConfirm('¿Eliminar este ejercicio y todas sus preguntas?','Eliminar',true).then(ok=>{ if(ok) deleteBlock(id); }); }; });
 
   const addVocBtn = document.querySelector('[data-action="add-vocab"]'); if(addVocBtn) addVocBtn.onclick=()=>openVocabModal(null);
   document.querySelectorAll('[data-edit-voc]').forEach(b=>{ b.onclick=()=>openVocabModal(b.getAttribute('data-edit-voc')); });
@@ -1667,7 +1895,7 @@ function afterRender(){
     missedIds.forEach(id=>{ const p=DATA.progress[id]; if(p){ p.box=0; p.lastSeen=null; } });
     save();
     state.examResult=null;
-    startPracticeSession('all');
+    startPracticeSession({});
   };
 
   // modal generic
@@ -1689,56 +1917,42 @@ function wireModalActions(){
     if(!name){ showToast('⚠️','Ponle un nombre al tema',''); return; }
     const notes = document.getElementById('m-topic-notes').value;
     const id = saveTopicBtn.getAttribute('data-id');
-    if(id){ const t=topicById(id); t.name=name; t.grammarNotes=notes; }
-    else { DATA.topics.push({id:uid(), name, grammarNotes:notes, createdAt:Date.now()}); }
+    const catBtn = document.querySelector('[data-topiccat].active');
+    const category = catBtn ? catBtn.getAttribute('data-topiccat') : 'grammar';
+    if(id){ const t=topicById(id); t.name=name; t.grammarNotes=notes; t.category=category; }
+    else { DATA.topics.push({id:uid(), name, grammarNotes:notes, category, createdAt:Date.now()}); }
     save(); closeModal(); render();
     showToast('✅', id?'Tema actualizado':'Tema creado','');
   };
 
-  const saveExBtn = document.querySelector('[data-action="save-exercise"]');
-  if(saveExBtn) saveExBtn.onclick=()=>{
-    const topicId = document.getElementById('m-ex-topic').value;
-    const type = document.getElementById('m-ex-type').value;
-    const prompt = document.getElementById('m-ex-prompt').value.trim();
-    if(!prompt){ showToast('⚠️','Escribe el enunciado',''); return; }
-    const hint = document.getElementById('m-ex-hint').value.trim();
-    const explanation = document.getElementById('m-ex-explanation').value.trim();
-    let payload = {topicId, type, prompt, hint, explanation};
-    if(type==='multiple_choice'){
-      const optInputs = Array.from(document.querySelectorAll('[data-mc-opt]'));
-      const options = optInputs.map(i=>i.value.trim());
-      if(options.some(o=>!o) || options.length<2){ showToast('⚠️','Completa todas las opciones',''); return; }
-      const checked = document.querySelector('input[name="mc-correct"]:checked');
-      if(!checked){ showToast('⚠️','Marca la opción correcta',''); return; }
-      payload.options = options; payload.correctIndex = Number(checked.value);
-    } else if(type==='fill_blank' || type==='translation'){
-      const accepted = document.getElementById('m-ex-accepted').value.split(',').map(s=>s.trim()).filter(Boolean);
-      if(accepted.length===0){ showToast('⚠️','Añade al menos una respuesta correcta',''); return; }
-      payload.acceptedAnswers = accepted;
-    } else if(type==='true_false'){
-      const activeBtn = document.querySelector('[data-tfcorrect].active');
-      payload.correctBool = activeBtn ? activeBtn.getAttribute('data-tfcorrect')==='true' : true;
-    } else if(type==='matching'){
-      const lefts = Array.from(document.querySelectorAll('[data-pair-left]'));
-      const rights = Array.from(document.querySelectorAll('[data-pair-right]'));
-      const pairs = lefts.map((el,i)=>({left:el.value.trim(), right:(rights[i]?rights[i].value.trim():'')}));
-      const validPairs = pairs.filter(p=>p.left && p.right);
-      if(validPairs.length < 3){ showToast('⚠️','Añade al menos 3 pares completos',''); return; }
-      if(validPairs.length !== pairs.length){ showToast('⚠️','Completa o elimina los pares vacíos',''); return; }
-      payload.pairs = validPairs;
-    } else if(type==='word_bank'){
-      const wordBank = document.getElementById('m-ex-wordbank').value.split(',').map(s=>s.trim()).filter(Boolean);
-      const correctAnswer = document.getElementById('m-ex-wordbank-correct').value.trim();
-      if(wordBank.length < 2){ showToast('⚠️','Añade al menos 2 palabras al banco (la correcta y un distractor)',''); return; }
-      if(!correctAnswer){ showToast('⚠️','Indica cuál es la palabra correcta',''); return; }
-      if(!wordBank.some(w=>normalizeStr(w)===normalizeStr(correctAnswer))){ showToast('⚠️','La palabra correcta debe estar en el banco de palabras',''); return; }
-      payload.wordBank = wordBank; payload.correctAnswer = correctAnswer;
+  const saveBlkBtn = document.querySelector('[data-action="save-block"]');
+  if(saveBlkBtn) saveBlkBtn.onclick=()=>{
+    const topicId = document.getElementById('m-blk-topic').value;
+    const kind = document.getElementById('m-blk-kind').value;
+    const title = document.getElementById('m-blk-title').value.trim();
+    const parsed = parseBlockItems(kind, document.getElementById('m-blk-items').value);
+    if(!topicId){ showToast('⚠️','Elige un tema',''); return; }
+    if(parsed.errors.length){ showToast('⚠️', parsed.errors[0], ''); return; }
+    if(kind==='matching' && parsed.items.length<2){ showToast('⚠️','Añade al menos 2 parejas',''); return; }
+    const hint = document.getElementById('m-blk-hint').value.trim();
+    const explanation = document.getElementById('m-blk-explanation').value.trim();
+    const extraWords = kind==='word_bank' ? document.getElementById('m-blk-extra').value.split(',').map(s=>s.trim()).filter(Boolean) : [];
+    const id = saveBlkBtn.getAttribute('data-id');
+    let block, old = [];
+    if(id){
+      block = blockById(id);
+      if(block.kind===kind) old = itemsOfBlock(block);
+      Object.assign(block, {topicId:topicId, kind:kind, title:title, hint:hint, explanation:explanation, extraWords:extraWords});
+    } else {
+      block = {id:uid(), topicId:topicId, kind:kind, title:title, hint:hint, explanation:explanation, extraWords:extraWords, createdAt:Date.now()};
+      DATA.blocks.push(block);
     }
-    const id = saveExBtn.getAttribute('data-id');
-    if(id){ Object.assign(exById(id), payload); }
-    else { payload.id = uid(); payload.createdAt = Date.now(); DATA.exercises.push(payload); }
+    const newItems = parsed.items.map((it,i)=>Object.assign({id:(old[i]?old[i].id:uid()), blockId:block.id, topicId:topicId, createdAt:(old[i]?old[i].createdAt:Date.now())}, it));
+    const keep = new Set(newItems.map(n=>n.id));
+    itemsOfBlock(block).forEach(o=>{ if(!keep.has(o.id)) delete DATA.progress[o.id]; });
+    DATA.exercises = DATA.exercises.filter(e=>e.blockId!==block.id).concat(newItems);
     save(); closeModal(); render();
-    showToast('✅', id?'Ejercicio actualizado':'Ejercicio creado','');
+    showToast('✅', id?'Ejercicio actualizado':'Ejercicio creado', newItems.length+' pregunta'+(newItems.length===1?'':'s'));
   };
 
   const saveVocBtn = document.querySelector('[data-action="save-vocab"]');
@@ -1780,23 +1994,31 @@ function wireModalActions(){
 }
 
 function deleteTopic(id){
+  DATA.exercises.filter(e=>e.topicId===id).forEach(e=>{ delete DATA.progress[e.id]; });
   DATA.exercises = DATA.exercises.filter(e=>e.topicId!==id);
+  DATA.blocks = DATA.blocks.filter(b=>b.topicId!==id);
   DATA.achievements.forEach(a=>{ if(a.type==='topic_mastery' && a.topicId===id){ a.type='total_correct'; a.topicId=undefined; } });
   DATA.topics = DATA.topics.filter(t=>t.id!==id);
   save(); render();
 }
-function deleteExercise(id){ DATA.exercises = DATA.exercises.filter(e=>e.id!==id); delete DATA.progress[id]; save(); render(); }
+function deleteBlock(id){
+  itemsOfBlock({id:id}).forEach(e=>{ delete DATA.progress[e.id]; });
+  DATA.exercises = DATA.exercises.filter(e=>e.blockId!==id);
+  DATA.blocks = DATA.blocks.filter(b=>b.id!==id);
+  save(); render();
+}
 function deleteVocab(id){ DATA.vocabulary = DATA.vocabulary.filter(v=>v.id!==id); save(); render(); }
 function deleteAchievement(id){ DATA.achievements = DATA.achievements.filter(a=>a.id!==id); DATA.unlockedAchievementIds = DATA.unlockedAchievementIds.filter(x=>x!==id); save(); render(); }
 
 /* ======================= PRACTICE / EXAM FLOW ======================= */
-function startPractice(topicId){
-  const pool = buildPracticePool(topicId);
-  if(pool.length===0){ showToast('⚠️','No hay ejercicios en este tema',''); return; }
-  const first = pickAdaptiveExercise(pool, null);
+function startPractice(filter){
+  filter = normFilter(filter);
+  const units = buildUnits(filter);
+  if(units.length===0){ showToast('⚠️','No hay ejercicios para esta selección',''); return; }
+  const first = pickWeighted(units, unitWeight);
   state.practice = {
-    pool, topicFilterId:topicId, current:first, seenIds:new Set([first.id]), allCovered:false,
-    answeredState:false, selected:null, textValue:'', lastCorrect:false,
+    pool:units, filter:filter, current:first, us:newUnitState(first),
+    seenIds:new Set([first.key]), allCovered:false,
     sessionCorrect:0, sessionTotal:0, sessionCurrentStreak:0, sessionBestStreak:0,
     startTime:Date.now()
   };
@@ -1804,170 +2026,140 @@ function startPractice(topicId){
 }
 // Arranca una sesión de práctica desde cualquier pantalla (p.ej. Estudio), cambiando
 // primero a la pantalla de Práctica para que startPractice() la renderice correctamente.
-function startPracticeSession(topicId){
+// Arranca una sesión de práctica desde cualquier pantalla (p.ej. Estudio).
+function startPracticeSession(filter){
   state.screen = 'practice';
-  startPractice(topicId);
+  startPractice(filter);
   window.scrollTo(0,0);
 }
 function wireRunnerEvents(){
-  if(state.screen==='practice' && state.practice){
-    const ctx = state.practice; const ex = ctx.current;
-    if(!ex) return;
-    document.querySelectorAll('[data-opt]').forEach(btn=>{
-      btn.onclick = ()=>{
-        if(ctx.answeredState) return;
-        const i = Number(btn.getAttribute('data-opt'));
-        submitPracticeAnswer(i);
-      };
-    });
-    document.querySelectorAll('[data-tf]').forEach(btn=>{
-      btn.onclick = ()=>{
-        if(ctx.answeredState) return;
-        submitPracticeAnswer(btn.getAttribute('data-tf')==='true');
-      };
-    });
-    document.querySelectorAll('[data-bankword]').forEach(btn=>{
-      btn.onclick = ()=>{
-        if(ctx.answeredState) return;
-        submitPracticeAnswer(btn.getAttribute('data-bankword'));
-      };
-    });
-    document.querySelectorAll('[data-match-left]').forEach(btn=>{
-      btn.onclick = ()=>{
-        const ms = ctx.matchingState; if(!ms) return;
-        const pos = Number(btn.getAttribute('data-match-left'));
-        if(ms.matchedLeft.has(pos)) return;
-        ms.selectedLeft = pos; ms.wrongFlashLeft=null; ms.wrongFlashRight=null;
-        render();
-      };
-    });
-    document.querySelectorAll('[data-match-right]').forEach(btn=>{
-      btn.onclick = ()=>{
-        const ms = ctx.matchingState; if(!ms || ms.selectedLeft===null || ms.selectedLeft===undefined) return;
-        const rpos = Number(btn.getAttribute('data-match-right'));
-        if(ms.matchedRight.has(rpos)) return;
-        const leftOrig = ms.leftOrder[ms.selectedLeft];
-        const rightOrig = ms.rightOrder[rpos];
-        if(leftOrig === rightOrig){
-          ms.matchedLeft.add(ms.selectedLeft);
-          ms.matchedRight.add(rpos);
-          ms.selectedLeft = null;
-          if(ms.matchedLeft.size === ex.pairs.length){ finishMatchingExercise(); }
-          else { beep(720,90); render(); }
-        } else {
-          ms.wrongAttempts++;
-          ms.wrongFlashLeft = ms.selectedLeft; ms.wrongFlashRight = rpos;
-          ms.selectedLeft = null;
-          beep(220,150);
-          render();
-          setTimeout(()=>{ if(ctx.matchingState===ms){ ms.wrongFlashLeft=null; ms.wrongFlashRight=null; render(); } }, 500);
-        }
-      };
-    });
-    const input = document.getElementById('free-answer-input');
-    if(input){
-      input.oninput = ()=>{ ctx.textValue = input.value; };
-      input.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); if(!ctx.answeredState) submitPracticeAnswer(input.value); } };
-      setupKeyboardScroll(input);
-    }
-    const checkBtn = document.querySelector('[data-action="practice-check"]');
-    if(checkBtn) checkBtn.onclick = ()=>submitPracticeAnswer(ctx.textValue);
-    const nextBtn = document.querySelector('[data-action="practice-next"]');
-    if(nextBtn) nextBtn.onclick = ()=>nextPracticeExercise();
-    const stopBtn = document.querySelector('[data-action="practice-stop"]');
-    if(stopBtn) stopBtn.onclick = ()=>{
-      showConfirm('¿Seguro que quieres terminar?', 'Sí', true, 'No').then(ok=>{
-        if(ok){ finishPracticeSession(); }
-      });
-    };
-    const hintBtn = document.querySelector('[data-action="show-hint"]');
-    if(hintBtn) hintBtn.onclick = ()=> openHintModal(ex.hint);
-    const continueBtn = document.querySelector('[data-action="practice-continue"]');
-    if(continueBtn) continueBtn.onclick = ()=> continuePracticeRound();
-    const finishSessionBtn = document.querySelector('[data-action="practice-finish-session"]');
-    if(finishSessionBtn) finishSessionBtn.onclick = ()=> finishPracticeSession();
-  }
   if(state.screen==='practice' && state.practiceResult){
-    const againBtn = document.querySelector('[data-action="practice-summary-again"]');
-    if(againBtn) againBtn.onclick = ()=>{
-      const topicId = state.practiceResult.topicFilterId;
+    const again = document.querySelector('[data-action="practice-summary-again"]');
+    if(again) again.onclick = ()=>{
+      const f = state.practiceResult.filter;
       state.practiceResult = null;
-      startPractice(topicId);
+      startPractice(f);
     };
-    const homeBtn = document.querySelector('[data-action="practice-summary-home"]');
-    if(homeBtn) homeBtn.onclick = ()=> setScreen('home');
-  }
-  if(state.screen==='exam' && state.exam){
-    const ctx = state.exam; const ex = ctx.questions[ctx.index];
-    if(!ex) return;
-    document.querySelectorAll('[data-opt]').forEach(btn=>{
-      btn.onclick = ()=>{ ctx.answers[ex.id] = Number(btn.getAttribute('data-opt')); render(); };
-    });
-    document.querySelectorAll('[data-tf]').forEach(btn=>{
-      btn.onclick = ()=>{ ctx.answers[ex.id] = btn.getAttribute('data-tf')==='true'; render(); };
-    });
-    document.querySelectorAll('[data-bankword]').forEach(btn=>{
-      btn.onclick = ()=>{ ctx.answers[ex.id] = btn.getAttribute('data-bankword'); render(); };
-    });
-    const input = document.getElementById('free-answer-input');
-    if(input){
-      input.oninput = ()=>{ ctx.answers[ex.id] = input.value; };
-      setupKeyboardScroll(input);
-    }
-    const nextBtn = document.querySelector('[data-action="exam-next"]');
-    if(nextBtn) nextBtn.onclick = ()=>{ ctx.index = Math.min(ctx.questions.length-1, ctx.index+1); render(); };
-    const prevBtn = document.querySelector('[data-action="exam-prev"]');
-    if(prevBtn) prevBtn.onclick = ()=>{ ctx.index = Math.max(0, ctx.index-1); render(); };
-    const submitBtn = document.querySelector('[data-action="exam-submit"]');
-    if(submitBtn) submitBtn.onclick = ()=>finishExam();
-    const finishEarly = document.querySelector('[data-action="exam-finish-early"]');
-    if(finishEarly) finishEarly.onclick = ()=>{ showConfirm('¿Terminar el examen ahora? Las preguntas no respondidas contarán como falladas.','Terminar',true).then(ok=>{ if(ok) finishExam(); }); };
-  }
-}
-function submitPracticeAnswer(userInput){
-  const ctx = state.practice; const ex = ctx.current;
-  const isCorrect = checkAnswer(ex, ex.type==='multiple_choice'?userInput:(ex.type==='true_false'?userInput:userInput));
-  ctx.answeredState = true; ctx.selected = userInput; ctx.lastCorrect = isCorrect;
-  ctx.sessionTotal++;
-  if(isCorrect){
-    ctx.sessionCorrect++;
-    ctx.sessionCurrentStreak++;
-    ctx.sessionBestStreak = Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak);
-  } else {
-    ctx.sessionCurrentStreak = 0;
-  }
-  recordAnswer(ex, isCorrect);
-  beep(isCorrect?880:220, isCorrect?140:220);
-  render();
-}
-function nextPracticeExercise(){
-  const ctx = state.practice;
-  const remaining = ctx.pool.filter(e=>!ctx.seenIds.has(e.id));
-  if(remaining.length===0){
-    ctx.allCovered = true;
-    render();
+    const home = document.querySelector('[data-action="practice-summary-home"]');
+    if(home) home.onclick = ()=> setScreen('home');
     return;
   }
-  const nextEx = pickAdaptiveExercise(remaining, null);
-  ctx.seenIds.add(nextEx.id);
-  ctx.current = nextEx; ctx.answeredState=false; ctx.selected=null; ctx.textValue=''; ctx.lastCorrect=false;
+  const isExam = state.screen==='exam' && !!state.exam;
+  const isPractice = state.screen==='practice' && !!state.practice;
+  if(!isExam && !isPractice) return;
+  const on = (sel, fn)=>{ const el = document.querySelector(sel); if(el) el.onclick = fn; };
+
+  if(isPractice){
+    on('[data-action="practice-stop"]', ()=>{
+      showConfirm('¿Seguro que quieres terminar?', 'Sí', true, 'No').then(ok=>{ if(ok) finishPracticeSession(); });
+    });
+    if(state.practice.allCovered){
+      on('[data-action="practice-continue"]', ()=> continuePracticeRound());
+      on('[data-action="practice-finish-session"]', ()=> finishPracticeSession());
+      return;
+    }
+  }
+
+  const mode = isExam ? 'exam' : 'practice';
+  const ctx = isExam ? state.exam : state.practice;
+  const u = isExam ? ctx.units[ctx.index] : ctx.current;
+  const us = isExam ? ctx.states[u.key] : ctx.us;
+  const locked = mode==='practice' && us.checked;
+  const changed = ()=>{
+    if(mode==='practice' && !us.checked && unitAutoCheck(u) && unitHasAnswers(u, us)) checkPracticeUnit();
+    else render();
+  };
+
+  document.querySelectorAll('[data-mc]').forEach(btn=>{
+    btn.onclick = ()=>{
+      if(locked) return;
+      const parts = btn.getAttribute('data-mc').split(':').map(Number);
+      us.answers[parts[0]] = parts[1];
+      changed();
+    };
+  });
+  document.querySelectorAll('[data-tf]').forEach(btn=>{
+    btn.onclick = ()=>{
+      if(locked) return;
+      const parts = btn.getAttribute('data-tf').split(':');
+      us.answers[Number(parts[0])] = (parts[1]==='true');
+      changed();
+    };
+  });
+  const inputs = Array.from(document.querySelectorAll('[data-unit-input]'));
+  inputs.forEach((inp,pos)=>{
+    const i = Number(inp.getAttribute('data-unit-input'));
+    inp.oninput = ()=>{ us.answers[i] = inp.value; };
+    inp.onkeydown = (e)=>{
+      if(e.key!=='Enter') return;
+      e.preventDefault();
+      if(pos<inputs.length-1) inputs[pos+1].focus();
+      else if(mode==='practice') checkPracticeUnit();
+      else inp.blur();
+    };
+    setupKeyboardScroll(inp);
+  });
+  wireAssignBoard(us, locked, changed);
+
+  on('[data-action="show-hint"]', ()=> openHintModal(u.block.hint));
+  if(mode==='practice'){
+    on('[data-action="practice-check"]', ()=> checkPracticeUnit());
+    on('[data-action="practice-next"]', ()=> nextPracticeUnit());
+  } else {
+    on('[data-action="exam-next"]', ()=>{ ctx.index = Math.min(ctx.units.length-1, ctx.index+1); render(); window.scrollTo(0,0); });
+    on('[data-action="exam-prev"]', ()=>{ ctx.index = Math.max(0, ctx.index-1); render(); window.scrollTo(0,0); });
+    on('[data-action="exam-submit"]', ()=> finishExam());
+    on('[data-action="exam-finish-early"]', ()=>{
+      showConfirm('¿Terminar el examen ahora? Las preguntas sin responder contarán como falladas.','Terminar',true).then(ok=>{ if(ok) finishExam(); });
+    });
+  }
+}
+// Corrige todas las preguntas del ejercicio actual; cada una cuenta como acierto o fallo por separado.
+function checkPracticeUnit(){
+  const ctx = state.practice, u = ctx.current, us = ctx.us;
+  if(us.checked) return;
+  const vals = unitValues(u, us);
+  us.results = u.items.map((ex,i)=>evalItem(ex, vals[i]));
+  us.checked = true;
+  let okCount = 0;
+  u.items.forEach((ex,i)=>{
+    const ok = us.results[i];
+    ctx.sessionTotal++;
+    if(ok){ ctx.sessionCorrect++; ctx.sessionCurrentStreak++; ctx.sessionBestStreak = Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak); okCount++; }
+    else { ctx.sessionCurrentStreak = 0; }
+    recordAnswer(ex, ok);
+  });
+  beep(okCount===u.items.length ? 880 : (okCount>0 ? 520 : 220), 160);
   render();
+}
+function nextPracticeUnit(){
+  const ctx = state.practice;
+  const remaining = ctx.pool.filter(u=>!ctx.seenIds.has(u.key));
+  if(remaining.length===0){ ctx.allCovered = true; render(); return; }
+  const next = pickWeighted(remaining, unitWeight);
+  ctx.seenIds.add(next.key);
+  ctx.current = next; ctx.us = newUnitState(next);
+  render();
+  window.scrollTo(0,0);
 }
 function continuePracticeRound(){
   const ctx = state.practice;
   if(!ctx) return;
   ctx.seenIds = new Set();
   ctx.allCovered = false;
-  const nextEx = pickAdaptiveExercise(ctx.pool, ctx.current ? ctx.current.id : null);
-  ctx.seenIds.add(nextEx.id);
-  ctx.current = nextEx; ctx.answeredState=false; ctx.selected=null; ctx.textValue=''; ctx.lastCorrect=false;
+  const others = ctx.pool.length>1 ? ctx.pool.filter(u=>u.key!==ctx.current.key) : ctx.pool;
+  const next = pickWeighted(others, unitWeight);
+  ctx.seenIds.add(next.key);
+  ctx.current = next; ctx.us = newUnitState(next);
   render();
+  window.scrollTo(0,0);
 }
 function finishPracticeSession(){
   const ctx = state.practice;
   if(!ctx){ setScreen('home'); return; }
   state.practiceResult = {
-    topicFilterId: ctx.topicFilterId,
+    filter: ctx.filter,
+    filterLabel: filterLabel(ctx.filter),
     sessionCorrect: ctx.sessionCorrect,
     sessionTotal: ctx.sessionTotal,
     errors: ctx.sessionTotal - ctx.sessionCorrect,
@@ -1988,24 +2180,24 @@ function formatDuration(ms){
   return min===0 ? (sec+' s') : (min+' min '+sec+' s');
 }
 function startExam(cfg){
-  const questions = buildExamQuestions(cfg);
-  if(questions.length===0){ showToast('⚠️','No hay ejercicios para esa selección',''); return; }
-  state.exam = {questions, index:0, answers:{}, startTime:Date.now(), config:cfg};
+  const units = buildExamUnits(cfg);
+  if(units.length===0){ showToast('⚠️','No hay ejercicios para esa selección',''); return; }
+  const states = {};
+  units.forEach(u=>{ states[u.key] = newUnitState(u); });
+  state.exam = {units:units, index:0, states:states, startTime:Date.now(), config:cfg};
   render();
+  window.scrollTo(0,0);
 }
 function finishExam(){
   const ctx = state.exam;
-  const details = ctx.questions.map(ex=>{
-    const userAns = ctx.answers[ex.id];
-    const isCorrect = userAns===undefined ? false : checkAnswer(ex, userAns);
-    let userAnswerLabel = '(sin responder)';
-    if(userAns!==undefined){
-      if(ex.type==='multiple_choice') userAnswerLabel = ex.options[userAns];
-      else if(ex.type==='true_false') userAnswerLabel = userAns ? 'Verdadero' : 'Falso';
-      else userAnswerLabel = userAns;
-    }
-    recordAnswer(ex, isCorrect);
-    return {ex, isCorrect, userAnswerLabel};
+  const details = [];
+  ctx.units.forEach(u=>{
+    const vals = unitValues(u, ctx.states[u.key]);
+    u.items.forEach((ex,i)=>{
+      const ok = evalItem(ex, vals[i]);
+      details.push({ex:ex, block:u.block, isCorrect:ok, userAnswerLabel:userLabel(ex, vals[i]), correctText:correctLabel(ex)});
+      recordAnswer(ex, ok);
+    });
   });
   const byTopic = {};
   details.forEach(d=>{
@@ -2015,14 +2207,15 @@ function finishExam(){
   });
   const correctCount = details.filter(d=>d.isCorrect).length;
   const percentage = Math.round(correctCount/details.length*100);
-  const record = {id:uid(), date:Date.now(), score:correctCount, total:details.length, percentage, byTopic, durationSec:Math.round((Date.now()-ctx.startTime)/1000)};
+  const record = {id:uid(), date:Date.now(), score:correctCount, total:details.length, percentage:percentage, byTopic:byTopic, durationSec:Math.round((Date.now()-ctx.startTime)/1000)};
   DATA.examHistory.push(record);
   if(DATA.examHistory.length>50) DATA.examHistory = DATA.examHistory.slice(-50);
   save();
   checkAchievements();
-  state.examResult = {correctCount, total:details.length, percentage, byTopic, details};
+  state.examResult = {correctCount:correctCount, total:details.length, percentage:percentage, byTopic:byTopic, details:details};
   state.exam = null;
   render();
+  window.scrollTo(0,0);
 }
 
 /* ======================= EXPORT / IMPORT ======================= */
