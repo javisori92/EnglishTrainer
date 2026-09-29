@@ -310,9 +310,10 @@ a{color:var(--accent); text-decoration:none;}
 .unit-num{font-weight:700; color:var(--text-secondary); margin-right:6px;}
 .unit-correct{font-size:13px; font-weight:700; color:var(--success); margin-top:2px; line-height:1.4;}
 .inline-input{
-  display:inline-block; width:auto; min-width:96px; max-width:100%; margin:2px 4px; padding:6px 10px;
+  display:inline-block; width:5ch; min-width:0; max-width:100%; margin:2px 4px; padding:6px 10px;
   border:none; border-bottom:2px solid var(--accent); border-radius:8px 8px 0 0; background:var(--bg-secondary);
   font-size:16px; font-weight:600; color:var(--text); outline:none; vertical-align:middle;
+  transition:width .08s ease;
 }
 .inline-input.block-input{display:block; width:100%; margin:8px 0 0;}
 .inline-input.correct{border-color:var(--success); background:var(--success-soft); color:var(--success);}
@@ -2087,9 +2088,15 @@ function wireRunnerEvents(){
     };
   });
   const inputs = Array.from(document.querySelectorAll('[data-unit-input]'));
+  function resizeInlineInput(inp){
+    if(inp.classList.contains('block-input')) return;
+    const len = inp.value.length;
+    inp.style.width = (len===0 ? 5 : len+1) + 'ch';
+  }
   inputs.forEach((inp,pos)=>{
     const i = Number(inp.getAttribute('data-unit-input'));
-    inp.oninput = ()=>{ us.answers[i] = inp.value; };
+    resizeInlineInput(inp);
+    inp.oninput = ()=>{ us.answers[i] = inp.value; resizeInlineInput(inp); };
     inp.onkeydown = (e)=>{
       if(e.key!=='Enter') return;
       e.preventDefault();
