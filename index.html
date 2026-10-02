@@ -280,7 +280,7 @@ a{color:var(--accent); text-decoration:none;}
 .empty-state p{font-size:14px; line-height:1.5; max-width:280px; margin:0 auto 18px;}
 
 /* Exercise runner */
-.exercise-wrap{padding-bottom:110px;}
+.exercise-wrap{padding-bottom:4px;}
 .progress-track{height:6px; background:var(--bg-secondary); border-radius:4px; overflow:hidden; margin-bottom:14px;}
 .progress-fill{height:100%; background:var(--accent); border-radius:4px; transition:width .25s ease;}
 .session-meta{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
@@ -299,23 +299,20 @@ a{color:var(--accent); text-decoration:none;}
 }
 .vocab-speak-btn svg{width:13px; height:13px;}
 .vocab-speak-btn:active{background:var(--accent-soft);}
-/* Ejercicios: bloques de preguntas */
+/* Ejercicios: bloques de preguntas (se muestran de una en una) */
 .ex-title{font-size:18px; font-weight:700; line-height:1.35;}
-.unit-items{margin-top:4px;}
-.unit-item{padding:12px 0; border-bottom:1px solid var(--separator);}
-.unit-item:last-child{border-bottom:none; padding-bottom:0;}
-.unit-item.single{border-bottom:none; padding-top:0;}
 .unit-head{display:flex; align-items:flex-start; gap:8px;}
 .unit-prompt{flex:1; min-width:0; font-size:16px; line-height:1.5;}
-.unit-num{font-weight:700; color:var(--text-secondary); margin-right:6px;}
-.unit-correct{font-size:13px; font-weight:700; color:var(--success); margin-top:2px; line-height:1.4;}
+.unit-num{font-weight:700; color:var(--text-secondary); margin-right:2px;}
+.unit-correct{font-size:13px; font-weight:700; color:var(--success); margin-top:8px; line-height:1.4;}
+.runner-actions{margin-top:16px;}
 .inline-input{
-  display:inline-block; width:5ch; min-width:0; max-width:100%; margin:2px 4px; padding:6px 10px;
+  box-sizing:content-box; display:inline-block; width:5ch; min-width:0; max-width:100%; margin:2px 4px; padding:6px 10px;
   border:none; border-bottom:2px solid var(--accent); border-radius:8px 8px 0 0; background:var(--bg-secondary);
   font-size:16px; font-weight:600; color:var(--text); outline:none; vertical-align:middle;
   transition:width .08s ease;
 }
-.inline-input.block-input{display:block; width:100%; margin:8px 0 0;}
+.inline-input.block-input{box-sizing:border-box; display:block; width:100%; margin:8px 0 0;}
 .inline-input.correct{border-color:var(--success); background:var(--success-soft); color:var(--success);}
 .inline-input.incorrect{border-color:var(--danger); background:var(--danger-soft); color:var(--danger);}
 .tf-btn.selected{border-color:var(--accent);}
@@ -383,17 +380,6 @@ a{color:var(--accent); text-decoration:none;}
 .feedback-box .fb-text{color:var(--text); font-size:14px; line-height:1.5;}
 .feedback-box .fb-title{font-weight:700; margin-bottom:3px;}
 
-.sticky-actions{
-  position:fixed; left:0; right:0; bottom:calc(var(--tabbar-h) + var(--safe-b)); z-index:22;
-  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));
-  background:var(--bg);
-  background:color-mix(in srgb, var(--bg) 90%, transparent);
-  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
-  border-top:1px solid var(--separator);
-  transition:transform .18s ease, bottom .18s ease;
-}
-@media (min-width:900px){ .sticky-actions{bottom:0;} }
-body.keyboard-open .sticky-actions{ bottom:0; }
 body.keyboard-open .tabbar{ display:none; }
 
 /* Modal / sheet */
@@ -620,6 +606,18 @@ function save(){
 
 /* ======================= HELPERS ======================= */
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Mide el ancho real del texto (la fuente no es monoespaciada, así que "ch" no sirve para esto).
+let inlineMeasurerEl = null;
+function getInlineMeasurer(){
+  if(!inlineMeasurerEl){
+    inlineMeasurerEl = document.createElement('span');
+    const s = inlineMeasurerEl.style;
+    s.position = 'absolute'; s.visibility = 'hidden'; s.whiteSpace = 'pre';
+    s.left = '-9999px'; s.top = '0'; s.fontSize = '16px'; s.fontWeight = '600'; s.fontFamily = 'var(--font)';
+    document.body.appendChild(inlineMeasurerEl);
+  }
+  return inlineMeasurerEl;
+}
 function mdLite(text){
   if(!text) return '';
   let esc = escapeHtml(text);
@@ -893,7 +891,14 @@ function poolWordsFor(u){
   return u.kind==='word_bank' ? answers.concat(u.block.extraWords||[]) : answers;
 }
 function newUnitState(u){
-  const us = {answers:u.items.map(()=>null), checked:false, results:null};
+  const us = {
+    answers: u.items.map(()=>null),
+    results: u.items.map(()=>null),
+    checked: false,          // usado por el tablero de arrastrar (matching/word_bank): el bloque entero a la vez
+    itemIndex: 0,            // usado por las listas: qué pregunta se muestra ahora
+    itemChecked: u.items.map(()=>false),
+    showResult: false        // true cuando ya se respondieron todas las preguntas de la lista
+  };
   if(ASSIGN_KINDS.includes(u.kind)){
     us.pool = shuffleArray(poolWordsFor(u));
     us.placed = u.items.map(()=>null);
@@ -906,8 +911,20 @@ function unitValues(u, us){
   return us.answers.slice();
 }
 function unitHasAnswers(u, us){ return unitValues(u, us).some(v=>v!==null && v!==undefined && v!==''); }
-function unitAutoCheck(u){ return u.items.length===1 && ['multiple_choice','true_false','word_bank'].includes(u.kind); }
-
+function unitAutoCheck(u){
+  if(ASSIGN_KINDS.includes(u.kind)) return u.items.length===1;
+  return ['multiple_choice','true_false'].includes(u.kind);
+}
+function isAnswered(v){ return v!==null && v!==undefined && v!==''; }
+// Resuelve qué bloque/pregunta tocan mostrar ahora mismo, en práctica o en examen.
+function currentRunnerCtx(mode){
+  if(mode==='exam'){
+    const ctx = state.exam, cur = ctx.flat[ctx.index];
+    return {ctx:ctx, u:cur.u, us:ctx.states[cur.u.key], itemIdx:cur.i, isAssign:ASSIGN_KINDS.includes(cur.u.kind)};
+  }
+  const ctx = state.practice;
+  return {ctx:ctx, u:ctx.current, us:ctx.us, itemIdx:ctx.us.itemIndex, isAssign:ASSIGN_KINDS.includes(ctx.current.kind)};
+}
 /* ======================= APP STATE / ROUTER ======================= */
 const TABS = [
   {id:'home', label:'Inicio', icon:'home'},
@@ -1241,41 +1258,54 @@ function speakText(s){ return String(s||'').replace(/_{2,}/g,' blank '); }
 function speakBtnHtml(text){ return '<button type="button" class="speak-btn" data-speak="'+escapeHtml(speakText(text))+'">'+icon('speaker',16)+'</button>'; }
 
 function renderExerciseRunner(mode){
-  const ctx = mode==='exam' ? state.exam : state.practice;
-  const u = mode==='exam' ? ctx.units[ctx.index] : ctx.current;
-  const us = mode==='exam' ? ctx.states[u.key] : ctx.us;
-  const checked = mode==='practice' && us.checked;
+  const rc = currentRunnerCtx(mode);
+  const ctx = rc.ctx, u = rc.u, us = rc.us, itemIdx = rc.itemIdx, isAssign = rc.isAssign;
+  const showResult = mode==='practice' && !isAssign && us.showResult;
+
   let html = '<div class="exercise-wrap">';
   if(mode==='exam'){
-    const pct = Math.round((ctx.index/ctx.units.length)*100);
-    html += '<div class="session-meta"><span class="footnote">Ejercicio '+(ctx.index+1)+' de '+ctx.units.length+'</span><button class="text-action-btn danger" data-action="exam-finish-early">'+icon('close',15)+' Terminar</button></div>';
+    const pct = Math.round((ctx.index/ctx.flat.length)*100);
+    html += '<div class="session-meta"><span class="footnote">Pregunta '+(ctx.index+1)+' de '+ctx.flat.length+'</span><button class="text-action-btn danger" data-action="exam-finish-early">'+icon('close',15)+' Terminar</button></div>';
     html += '<div class="progress-track"><div class="progress-fill" style="width:'+pct+'%;"></div></div>';
   } else {
     html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="practice-stop">'+icon('close',15)+' Terminar</button></div>';
   }
-  html += renderUnitCard(u, us, mode);
+
+  if(showResult) html += renderUnitResultCard(u, us);
+  else if(isAssign) html += renderAssignCard(u, us, mode);
+  else html += renderListItemCard(u, us, itemIdx, mode);
   html += '</div>';
 
   let actions = '';
-  if(mode==='practice'){
-    if(!checked){
+  if(showResult){
+    actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente ejercicio</button>';
+  } else if(mode==='practice'){
+    if(isAssign){
+      if(!us.checked){
+        if(!unitAutoCheck(u)) actions = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
+      } else {
+        actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
+      }
+    } else if(!us.itemChecked[itemIdx]){
       if(!unitAutoCheck(u)) actions = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
-    } else {
+    } else if(u.items.length===1){
       actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
+    } else {
+      const isLastItem = itemIdx===u.items.length-1;
+      actions = '<button class="btn btn-primary" data-action="practice-item-next">'+(isLastItem?'Ver resultado':'Siguiente')+'</button>';
     }
   } else {
-    const isLast = ctx.index === ctx.units.length-1;
+    const isLast = ctx.index === ctx.flat.length-1;
     actions = '<div class="btn-block-row">';
     if(ctx.index>0) actions += '<button class="btn btn-secondary" data-action="exam-prev" style="flex:0 0 90px;">Atrás</button>';
     actions += '<button class="btn btn-primary" data-action="'+(isLast?'exam-submit':'exam-next')+'">'+(isLast?'Finalizar examen':'Siguiente')+'</button></div>';
   }
-  if(actions) html += '<div class="sticky-actions">'+actions+'</div>';
+  if(actions) html += '<div class="runner-actions">'+actions+'</div>';
   return html;
 }
 
-function renderUnitCard(u, us, mode){
-  const t = topicById(u.topicId);
-  const b = u.block;
+function renderAssignCard(u, us, mode){
+  const t = topicById(u.topicId), b = u.block;
   const checked = mode==='practice' && us.checked;
   let html = '<div class="exercise-card">';
   html += '<div class="ex-card-header"><div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(u.kind)+'</div>'+
@@ -1283,51 +1313,78 @@ function renderUnitCard(u, us, mode){
   if(b.title){
     html += '<div class="row-between" style="align-items:flex-start; gap:8px; margin-bottom:6px;"><div class="ex-title">'+escapeHtml(b.title)+'</div>'+speakBtnHtml(b.title)+'</div>';
   }
-  html += renderUnitItems(u, us, checked);
+  html += renderAssignBoard(u, us, checked);
   if(checked){
     const ok = us.results.filter(Boolean).length, n = us.results.length;
     const all = ok===n;
-    html += '<div class="feedback-box '+(all?'ok':'bad')+'">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(n>1 ? ok+' de '+n+' correctas' : (all?'¡Correcto!':'No es correcto'))+'</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div></div>';
+    html += '<div class="feedback-box '+(all?'ok':'bad')+'">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(n>1?ok+' de '+n+' correctas':(all?'¡Correcto!':'No es correcto'))+'</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div></div>';
   }
   html += '</div>';
   return html;
 }
 
-function renderUnitItems(u, us, checked){
-  if(ASSIGN_KINDS.includes(u.kind)) return renderAssignBoard(u, us, checked);
-  const multi = u.items.length>1;
-  const k = u.kind;
-  return '<div class="unit-items">' + u.items.map((ex,i)=>{
-    const num = multi ? '<span class="unit-num">'+(i+1)+'.</span>' : '';
-    const okCls = checked ? (us.results[i] ? 'correct' : 'incorrect') : '';
-    let body = '';
-    if(k==='fill_blank' || k==='translation'){
-      const val = us.answers[i]==null ? '' : us.answers[i];
-      const inp = (extra)=>'<input type="text" class="inline-input '+extra+' '+okCls+'" data-unit-input="'+i+'" value="'+escapeHtml(val)+'" '+(checked?'disabled':'')+' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Respuesta '+(i+1)+'">';
-      const m = k==='fill_blank' ? ex.prompt.match(/_{2,}/) : null;
-      if(m){ body = escapeHtml(ex.prompt.slice(0,m.index)) + inp('') + escapeHtml(ex.prompt.slice(m.index+m[0].length)); }
-      else { body = escapeHtml(ex.prompt) + inp('block-input'); }
-      if(checked && !us.results[i]) body += '<div class="unit-correct">✓ '+escapeHtml(correctLabel(ex))+'</div>';
-    } else if(k==='true_false'){
-      const sel = us.answers[i];
-      body = '<div>'+escapeHtml(ex.prompt)+'</div><div class="tf-row">' + [true,false].map(v=>{
-        let c = 'tf-btn';
-        if(checked){ if(v===ex.correctBool) c += ' correct'; else if(sel===v) c += ' incorrect'; }
-        else if(sel===v) c += ' selected';
-        return '<button type="button" class="'+c+'" data-tf="'+i+':'+v+'" '+(checked?'disabled':'')+'>'+(v?'Verdadero':'Falso')+'</button>';
-      }).join('') + '</div>';
-    } else if(k==='multiple_choice'){
-      const sel = us.answers[i];
-      body = '<div>'+escapeHtml(ex.prompt)+'</div>' + ex.options.map((opt,j)=>{
-        let c = 'option-row';
-        if(checked){ if(j===ex.correctIndex) c += ' correct'; else if(sel===j) c += ' incorrect'; }
-        else if(sel===j) c += ' selected';
-        return '<button type="button" class="'+c+'" data-mc="'+i+':'+j+'" '+(checked?'disabled':'')+'><span class="opt-letter">'+String.fromCharCode(65+j)+'</span><span>'+escapeHtml(opt)+'</span></button>';
-      }).join('');
-    }
-    return '<div class="unit-item'+(multi?'':' single')+'"><div class="unit-head"><div class="unit-prompt'+(multi?'':' ex-question')+'">'+num+body+'</div>'+speakBtnHtml(ex.prompt)+'</div></div>';
-  }).join('') + '</div>';
+function renderListItemCard(u, us, i, mode){
+  const t = topicById(u.topicId), b = u.block, ex = u.items[i];
+  const checked = mode==='practice' && us.itemChecked[i];
+  let html = '<div class="exercise-card">';
+  html += '<div class="ex-card-header"><div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(u.kind)+'</div>'+
+    (mode==='practice' && b.hint && !checked ? '<button type="button" class="help-btn" data-action="show-hint">'+icon('help',18)+'</button>' : '')+'</div>';
+  if(b.title){
+    html += '<div class="row-between" style="align-items:flex-start; gap:8px; margin-bottom:6px;"><div class="ex-title">'+escapeHtml(b.title)+'</div>'+speakBtnHtml(b.title)+'</div>';
+  }
+  html += renderSingleItem(u.kind, ex, us, i, checked);
+  if(checked){
+    const ok = us.results[i];
+    html += '<div class="feedback-box '+(ok?'ok':'bad')+'">'+icon(ok?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(ok?'¡Correcto!':'No es correcto')+'</div></div></div>';
+  }
+  html += '</div>';
+  return html;
 }
+
+function renderUnitResultCard(u, us){
+  const t = topicById(u.topicId), b = u.block;
+  const ok = us.results.filter(Boolean).length, n = us.results.length;
+  const all = ok===n;
+  let html = '<div class="exercise-card">';
+  html += '<div class="ex-topic-tag">'+escapeHtml(t?t.name:'')+' · '+typeLabel(u.kind)+'</div>';
+  if(b.title) html += '<div class="ex-title" style="margin-top:6px;">'+escapeHtml(b.title)+'</div>';
+  html += '<div class="feedback-box '+(all?'ok':'bad')+'" style="margin-top:14px;">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+ok+' de '+n+' correctas</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div></div>';
+  html += '</div>';
+  return html;
+}
+
+// Una sola pregunta (el número y el enunciado siempre en la misma línea).
+function renderSingleItem(kind, ex, us, i, checked){
+  const num = '<span class="unit-num">'+(i+1)+'.</span> ';
+  const val = us.answers[i];
+  const answered = isAnswered(val);
+  let body = '';
+  if(kind==='fill_blank' || kind==='translation'){
+    const okCls = checked ? (answered ? (us.results[i]?'correct':'incorrect') : '') : '';
+    const inp = (extra)=>'<input type="text" class="inline-input '+extra+' '+okCls+'" data-unit-input="'+i+'" value="'+escapeHtml(val==null?'':val)+'" '+(checked?'disabled':'')+' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Respuesta">';
+    const m = kind==='fill_blank' ? ex.prompt.match(/_{2,}/) : null;
+    if(m){ body = num + escapeHtml(ex.prompt.slice(0,m.index)) + inp('') + escapeHtml(ex.prompt.slice(m.index+m[0].length)); }
+    else { body = num + escapeHtml(ex.prompt) + inp('block-input'); }
+    if(checked && answered && !us.results[i]) body += '<div class="unit-correct">✓ '+escapeHtml(correctLabel(ex))+'</div>';
+  } else if(kind==='true_false'){
+    body = num + escapeHtml(ex.prompt) + '<div class="tf-row">' + [true,false].map(v=>{
+      let c = 'tf-btn';
+      if(checked && answered){ if(v===ex.correctBool) c+=' correct'; else if(val===v) c+=' incorrect'; }
+      else if(val===v) c += ' selected';
+      return '<button type="button" class="'+c+'" data-tf="'+i+':'+v+'" '+(checked?'disabled':'')+'>'+(v?'Verdadero':'Falso')+'</button>';
+    }).join('') + '</div>';
+  } else if(kind==='multiple_choice'){
+    body = num + escapeHtml(ex.prompt) + ex.options.map((opt,j)=>{
+      let c = 'option-row';
+      if(checked && answered){ if(j===ex.correctIndex) c+=' correct'; else if(val===j) c+=' incorrect'; }
+      else if(val===j) c += ' selected';
+      return '<button type="button" class="'+c+'" data-mc="'+i+':'+j+'" '+(checked?'disabled':'')+'><span class="opt-letter">'+String.fromCharCode(65+j)+'</span><span>'+escapeHtml(opt)+'</span></button>';
+    }).join('');
+  }
+  return '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div>'+speakBtnHtml(ex.prompt)+'</div>';
+}
+
+
 
 // Tablero de arrastrar: sirve para "Unir" (palabra -> definición) y "Banco de palabras" (palabra -> hueco).
 function renderAssignBoard(u, us, checked){
@@ -2062,18 +2119,20 @@ function wireRunnerEvents(){
   }
 
   const mode = isExam ? 'exam' : 'practice';
-  const ctx = isExam ? state.exam : state.practice;
-  const u = isExam ? ctx.units[ctx.index] : ctx.current;
-  const us = isExam ? ctx.states[u.key] : ctx.us;
-  const locked = mode==='practice' && us.checked;
+  const rc = currentRunnerCtx(mode);
+  const ctx = rc.ctx, u = rc.u, us = rc.us, itemIdx = rc.itemIdx, isAssign = rc.isAssign;
+  const itemLocked = mode==='practice' && (isAssign ? us.checked : us.itemChecked[itemIdx]);
   const changed = ()=>{
-    if(mode==='practice' && !us.checked && unitAutoCheck(u) && unitHasAnswers(u, us)) checkPracticeUnit();
-    else render();
+    if(mode==='practice'){
+      if(isAssign){ if(!us.checked && unitAutoCheck(u) && unitHasAnswers(u, us)){ checkPracticeUnit(); return; } }
+      else if(!us.itemChecked[itemIdx] && unitAutoCheck(u) && isAnswered(us.answers[itemIdx])){ checkCurrentItem(); return; }
+    }
+    render();
   };
 
   document.querySelectorAll('[data-mc]').forEach(btn=>{
     btn.onclick = ()=>{
-      if(locked) return;
+      if(itemLocked) return;
       const parts = btn.getAttribute('data-mc').split(':').map(Number);
       us.answers[parts[0]] = parts[1];
       changed();
@@ -2081,7 +2140,7 @@ function wireRunnerEvents(){
   });
   document.querySelectorAll('[data-tf]').forEach(btn=>{
     btn.onclick = ()=>{
-      if(locked) return;
+      if(itemLocked) return;
       const parts = btn.getAttribute('data-tf').split(':');
       us.answers[Number(parts[0])] = (parts[1]==='true');
       changed();
@@ -2090,30 +2149,32 @@ function wireRunnerEvents(){
   const inputs = Array.from(document.querySelectorAll('[data-unit-input]'));
   function resizeInlineInput(inp){
     if(inp.classList.contains('block-input')) return;
-    const len = inp.value.length;
-    inp.style.width = (len===0 ? 5 : len+1) + 'ch';
+    if(!inp.value){ inp.style.width = '5ch'; return; }
+    const m = getInlineMeasurer();
+    m.textContent = inp.value + ' ';
+    inp.style.width = m.offsetWidth + 'px';
   }
-  inputs.forEach((inp,pos)=>{
+  inputs.forEach(inp=>{
     const i = Number(inp.getAttribute('data-unit-input'));
     resizeInlineInput(inp);
     inp.oninput = ()=>{ us.answers[i] = inp.value; resizeInlineInput(inp); };
     inp.onkeydown = (e)=>{
       if(e.key!=='Enter') return;
       e.preventDefault();
-      if(pos<inputs.length-1) inputs[pos+1].focus();
-      else if(mode==='practice') checkPracticeUnit();
-      else inp.blur();
+      inp.blur();
+      if(mode==='practice' && !us.itemChecked[i]) checkCurrentItem();
     };
     setupKeyboardScroll(inp);
   });
-  wireAssignBoard(us, locked, changed);
+  wireAssignBoard(us, itemLocked, changed);
 
   on('[data-action="show-hint"]', ()=> openHintModal(u.block.hint));
   if(mode==='practice'){
-    on('[data-action="practice-check"]', ()=> checkPracticeUnit());
+    on('[data-action="practice-check"]', ()=>{ if(isAssign) checkPracticeUnit(); else checkCurrentItem(); });
+    on('[data-action="practice-item-next"]', ()=> advancePracticeItem());
     on('[data-action="practice-next"]', ()=> nextPracticeUnit());
   } else {
-    on('[data-action="exam-next"]', ()=>{ ctx.index = Math.min(ctx.units.length-1, ctx.index+1); render(); window.scrollTo(0,0); });
+    on('[data-action="exam-next"]', ()=>{ ctx.index = Math.min(ctx.flat.length-1, ctx.index+1); render(); window.scrollTo(0,0); });
     on('[data-action="exam-prev"]', ()=>{ ctx.index = Math.max(0, ctx.index-1); render(); window.scrollTo(0,0); });
     on('[data-action="exam-submit"]', ()=> finishExam());
     on('[data-action="exam-finish-early"]', ()=>{
@@ -2122,6 +2183,7 @@ function wireRunnerEvents(){
   }
 }
 // Corrige todas las preguntas del ejercicio actual; cada una cuenta como acierto o fallo por separado.
+// Corrige el tablero completo (emparejar / banco de palabras): todas sus casillas a la vez.
 function checkPracticeUnit(){
   const ctx = state.practice, u = ctx.current, us = ctx.us;
   if(us.checked) return;
@@ -2138,6 +2200,29 @@ function checkPracticeUnit(){
   });
   beep(okCount===u.items.length ? 880 : (okCount>0 ? 520 : 220), 160);
   render();
+}
+// Corrige solo la pregunta actual de una lista (rellenar hueco, V/F, opción múltiple).
+function checkCurrentItem(){
+  const ctx = state.practice, u = ctx.current, us = ctx.us;
+  const i = us.itemIndex;
+  if(us.itemChecked[i]) return;
+  const ok = evalItem(u.items[i], us.answers[i]);
+  us.itemChecked[i] = true;
+  us.results[i] = ok;
+  ctx.sessionTotal++;
+  if(ok){ ctx.sessionCorrect++; ctx.sessionCurrentStreak++; ctx.sessionBestStreak = Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak); }
+  else { ctx.sessionCurrentStreak = 0; }
+  recordAnswer(u.items[i], ok);
+  beep(ok?880:220, 160);
+  render();
+}
+// Pasa a la siguiente pregunta del ejercicio actual, o al resultado si era la última.
+function advancePracticeItem(){
+  const ctx = state.practice, u = ctx.current, us = ctx.us;
+  if(us.itemIndex < u.items.length-1){ us.itemIndex++; }
+  else { us.showResult = true; }
+  render();
+  window.scrollTo(0,0);
 }
 function nextPracticeUnit(){
   const ctx = state.practice;
@@ -2190,8 +2275,13 @@ function startExam(cfg){
   const units = buildExamUnits(cfg);
   if(units.length===0){ showToast('⚠️','No hay ejercicios para esa selección',''); return; }
   const states = {};
-  units.forEach(u=>{ states[u.key] = newUnitState(u); });
-  state.exam = {units:units, index:0, states:states, startTime:Date.now(), config:cfg};
+  const flat = [];
+  units.forEach(u=>{
+    states[u.key] = newUnitState(u);
+    if(ASSIGN_KINDS.includes(u.kind)) flat.push({u:u, i:null});
+    else u.items.forEach((_,i)=> flat.push({u:u, i:i}));
+  });
+  state.exam = {units:units, flat:flat, index:0, states:states, startTime:Date.now(), config:cfg};
   render();
   window.scrollTo(0,0);
 }
