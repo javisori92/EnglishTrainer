@@ -349,6 +349,12 @@ a{color:var(--accent); text-decoration:none;}
   background:var(--accent); color:#fff; font-size:15px; font-weight:700; line-height:1.2; text-align:center;
   box-shadow:0 10px 24px rgba(0,0,0,.3); will-change:transform; box-sizing:border-box;
 }
+/* Ordenar palabras */
+.reorder-answer{display:flex; flex-wrap:wrap; gap:8px; min-height:48px; padding:12px; border:2px dashed var(--separator); border-radius:12px; margin-top:12px; align-items:center;}
+.reorder-bank{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--separator);}
+.reorder-chip{padding:9px 14px; border-radius:18px; background:var(--accent-soft); color:var(--accent); border:none; font-size:15px; font-weight:700;}
+.reorder-chip.placed{background:var(--bg-secondary); color:var(--text);}
+
 /* Botón de audio del enunciado */
 .speak-btn{
   flex-shrink:0; width:30px; height:30px; border-radius:15px; background:var(--bg-secondary);
@@ -534,7 +540,8 @@ function defaultData(){
     streak: {current:0, longest:0, lastActiveDate:null, activeDates:[]},
     totalStats: {totalAnswered:0, totalCorrect:0, correctStreak:0, bestCorrectStreak:0},
     settings: {theme:'auto', examQuestionCount:10, dailyGoal:15, soundEnabled:true},
-    unlockedAchievementIds: []
+    unlockedAchievementIds: [],
+    dailyProgress: {date:null, count:0}
   };
 }
 
@@ -553,7 +560,8 @@ function normalizeData(parsed){
     streak: Object.assign(d.streak, parsed.streak||{}),
     totalStats: Object.assign(d.totalStats, parsed.totalStats||{}),
     settings: Object.assign(d.settings, parsed.settings||{}),
-    unlockedAchievementIds: Array.isArray(parsed.unlockedAchievementIds) ? parsed.unlockedAchievementIds : []
+    unlockedAchievementIds: Array.isArray(parsed.unlockedAchievementIds) ? parsed.unlockedAchievementIds : [],
+    dailyProgress: Object.assign(d.dailyProgress, parsed.dailyProgress||{})
   });
   migrateToBlocks(out);
   return out;
@@ -648,6 +656,12 @@ function topicAccuracy(topicId){
   exs.forEach(e=>{ const p=getProgress(e.id); correct+=p.correct; attempts+=p.attempts; });
   return {attempts, correct, pct: attempts>0 ? Math.round(correct/attempts*100) : null};
 }
+function categoryAccuracy(category){
+  const items = DATA.vocabulary.filter(v=>v.category===category);
+  let correct=0, attempts=0;
+  items.forEach(v=>{ const p=getProgress(v.id); correct+=p.correct; attempts+=p.attempts; });
+  return {attempts, correct, pct: attempts>0 ? Math.round(correct/attempts*100) : null};
+}
 function overallAccuracy(){
   const t = DATA.totalStats;
   return t.totalAnswered>0 ? Math.round(t.totalCorrect/t.totalAnswered*100) : 0;
@@ -670,7 +684,8 @@ const KIND_META = {
   true_false:{label:'Verdadero / Falso'},
   translation:{label:'Traducción / frase'},
   matching:{label:'Unir (arrastrar)'},
-  word_bank:{label:'Banco de palabras'}
+  word_bank:{label:'Banco de palabras'},
+  reorder:{label:'Ordenar palabras'}
 };
 const ASSIGN_KINDS = ['matching','word_bank'];
 function typeLabel(t){ return (KIND_META[t]||{}).label || t; }
@@ -800,9 +815,21 @@ function exerciseWeight(ex){
     const daysSince = p.lastSeen ? (Date.now()-p.lastSeen)/86400000 : 999;
     if(daysSince >= dueDays) weight += 25; else weight *= 0.25;
   }
-  const t = topicAccuracy(ex.topicId);
-  if(t.attempts >= 4 && t.pct !== null && t.pct < 60) weight *= 1.4;
+  if(ex.topicId){
+    const t = topicAccuracy(ex.topicId);
+    if(t.attempts >= 4 && t.pct !== null && t.pct < 60) weight *= 1.4;
+  } else if(ex.category){
+    const c = categoryAccuracy(ex.category);
+    if(c.attempts >= 4 && c.pct !== null && c.pct < 60) weight *= 1.4;
+  }
   return Math.max(weight, 1);
+}
+function isDue(ex){
+  const p = getProgress(ex.id);
+  if(p.attempts === 0) return true;
+  const dueDays = LEITNER_DAYS[p.box||0];
+  const daysSince = p.lastSeen ? (Date.now()-p.lastSeen)/86400000 : 999;
+  return daysSince >= dueDays;
 }
 function pickWeighted(list, weightFn){
   if(!list.length) return null;
@@ -850,6 +877,9 @@ function recordAnswer(ex, isCorrect){
   } else {
     DATA.totalStats.correctStreak = 0;
   }
+  const today = todayStr();
+  if(DATA.dailyProgress.date !== today){ DATA.dailyProgress = {date:today, count:0}; }
+  DATA.dailyProgress.count++;
   registerActivity();
   save();
   checkAchievements();
@@ -872,18 +902,24 @@ function evalItem(ex, val){
   if(ex.type==='multiple_choice') return Number(val)===Number(ex.correctIndex);
   if(ex.type==='true_false') return Boolean(val)===Boolean(ex.correctBool);
   if(ex.type==='word_bank' || ex.type==='matching') return normalizeStr(val)===normalizeStr(ex.correctAnswer);
+  if(ex.type==='reorder'){
+    if(!Array.isArray(val) || val.length!==ex.correctOrder.length) return false;
+    return val.every((w,idx)=>normalizeStr(w)===normalizeStr(ex.correctOrder[idx]));
+  }
   return (ex.acceptedAnswers||[]).map(normalizeStr).includes(normalizeStr(val));
 }
 function correctLabel(ex){
   if(ex.type==='multiple_choice') return ex.options[ex.correctIndex];
   if(ex.type==='true_false') return ex.correctBool ? 'Verdadero' : 'Falso';
   if(ex.type==='word_bank' || ex.type==='matching') return ex.correctAnswer;
+  if(ex.type==='reorder') return ex.correctOrder.join(' ');
   return (ex.acceptedAnswers||[])[0] || '';
 }
 function userLabel(ex, val){
-  if(val===null || val===undefined || val==='') return '(sin responder)';
+  if(val===null || val===undefined || val==='' || (Array.isArray(val) && val.length===0)) return '(sin responder)';
   if(ex.type==='multiple_choice') return ex.options[val];
   if(ex.type==='true_false') return val ? 'Verdadero' : 'Falso';
+  if(ex.type==='reorder') return Array.isArray(val) ? val.join(' ') : String(val);
   return String(val);
 }
 function poolWordsFor(u){
@@ -892,7 +928,7 @@ function poolWordsFor(u){
 }
 function newUnitState(u){
   const us = {
-    answers: u.items.map(()=>null),
+    answers: u.items.map(it=> it.type==='reorder' ? [] : null),
     results: u.items.map(()=>null),
     checked: false,          // usado por el tablero de arrastrar (matching/word_bank): el bloque entero a la vez
     itemIndex: 0,            // usado por las listas: qué pregunta se muestra ahora
@@ -903,6 +939,10 @@ function newUnitState(u){
     us.pool = shuffleArray(poolWordsFor(u));
     us.placed = u.items.map(()=>null);
     us.armed = null;
+  }
+  if(u.kind==='reorder'){
+    us.reorderBanks = u.items.map(it=> shuffleArray(it.correctOrder.slice()));
+    us.reorderPlaced = u.items.map(()=>[]);
   }
   return us;
 }
@@ -915,7 +955,11 @@ function unitAutoCheck(u){
   if(ASSIGN_KINDS.includes(u.kind)) return u.items.length===1;
   return ['multiple_choice','true_false'].includes(u.kind);
 }
-function isAnswered(v){ return v!==null && v!==undefined && v!==''; }
+function isAnswered(v){ if(Array.isArray(v)) return v.length>0; return v!==null && v!==undefined && v!==''; }
+function canCheckItem(u, us, i){
+  if(u.kind!=='reorder') return true;
+  return us.answers[i].length === us.reorderBanks[i].length;
+}
 // Resuelve qué bloque/pregunta tocan mostrar ahora mismo, en práctica o en examen.
 function currentRunnerCtx(mode){
   if(mode==='exam'){
@@ -953,6 +997,8 @@ let state = {
   vocabTranslateShown: {},
   practice: null,   // {pool, filter, current, us, seenIds, allCovered, sessionCorrect, sessionTotal, startTime}
   practiceResult: null, // resumen de la sesión de práctica al finalizar
+  vocabPractice: null,  // {pool, category, current, seenIds, allCovered, showAnswer, sessionCorrect, sessionTotal, startTime}
+  vocabPracticeResult: null,
   exam: null,       // {units, index, states, startTime, config}
   examResult: null
 };
@@ -969,7 +1015,7 @@ function setScreen(id){
   doSetScreen(id);
 }
 function doSetScreen(id){
-  if(id !== 'practice'){ state.practice = null; state.practiceResult = null; }
+  if(id !== 'practice'){ state.practice = null; state.practiceResult = null; state.vocabPractice = null; state.vocabPracticeResult = null; }
   if(id !== 'exam'){ state.exam = null; state.examResult = null; }
   if(id !== 'study') { /* keep studyTopicId so returning to Estudio remembers last topic */ }
   state.screen = id;
@@ -1042,6 +1088,21 @@ function renderHome(){
   let html = '';
 
   html += '<div class="streak-card"><div class="streak-top"><div class="streak-flame">🔥</div><div><div class="streak-num">'+s.current+' día'+(s.current===1?'':'s')+'</div><div class="streak-sub">Racha actual · récord '+s.longest+'</div></div></div><div class="streak-dots">'+dots+'</div></div>';
+
+  const goal = DATA.settings.dailyGoal||15;
+  const todayCount = DATA.dailyProgress.date===todayStr() ? DATA.dailyProgress.count : 0;
+  const goalPct = Math.min(100, Math.round(todayCount/goal*100));
+  const goalDone = todayCount>=goal;
+  html += '<div class="card"><div class="row-between"><span style="font-weight:700;">🎯 Objetivo diario</span><span class="footnote">'+todayCount+' / '+goal+'</span></div><div class="topic-bar-track" style="margin-top:8px;"><div class="topic-bar-fill" style="width:'+goalPct+'%; background:'+(goalDone?'var(--success)':'var(--accent)')+';"></div></div>'+(goalDone?'<div class="footnote" style="color:var(--success); font-weight:700; margin-top:6px;">¡Objetivo cumplido hoy! 🎉</div>':'')+'</div>';
+
+  const dueEx = DATA.exercises.filter(isDue).length;
+  const dueVoc = DATA.vocabulary.filter(isDue).length;
+  if(dueEx>0 || dueVoc>0){
+    html += '<div class="card" style="background:var(--accent-soft);"><div style="font-weight:700; color:var(--accent);">📬 Repaso pendiente</div><div class="footnote" style="margin-top:2px;">'+(dueEx>0?dueEx+' pregunta'+(dueEx===1?'':'s'):'')+(dueEx>0&&dueVoc>0?' · ':'')+(dueVoc>0?dueVoc+' palabra'+(dueVoc===1?'':'s'):'')+'</div><div class="btn-block-row" style="margin-top:10px;">'+
+      (dueEx>0?'<button class="btn btn-secondary" data-action="review-due-exercises" style="flex:1;">Repasar ejercicios</button>':'')+
+      (dueVoc>0?'<button class="btn btn-secondary" data-action="review-due-vocab" style="flex:1;">Repasar vocabulario</button>':'')+
+    '</div></div>';
+  }
 
   html += '<div class="stat-grid">'+
     '<div class="stat-card"><div class="stat-num">'+DATA.totalStats.totalAnswered+'</div><div class="stat-label">Ejercicios respondidos</div></div>'+
@@ -1134,6 +1195,8 @@ function renderStudyTopic(){
 /* ======================= PRACTICE ======================= */
 function renderPractice(){
   if(state.practiceResult) return renderPracticeSummary();
+  if(state.vocabPracticeResult) return renderVocabPracticeSummary();
+  if(state.vocabPractice) return state.vocabPractice.allCovered ? renderVocabCovered() : renderVocabPracticeScreen();
   if(!state.practice){
     // La práctica siempre se inicia desde Estudio (Práctica global o Practicar este tema);
     // esta pantalla solo debería verse mientras hay una sesión activa.
@@ -1175,6 +1238,116 @@ function renderPracticeSummary(){
   html += '<button class="btn btn-primary" data-action="practice-summary-again">'+icon('dumbbell',18)+' Practicar de nuevo</button>';
   html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="practice-summary-home">Volver a Inicio</button>';
   return html;
+}
+
+function startVocabPractice(category){
+  const pool = category==='all' ? DATA.vocabulary.slice() : DATA.vocabulary.filter(v=>v.category===category);
+  if(pool.length===0){ showToast('⚠️','No hay vocabulario para practicar',''); return; }
+  const first = pickWeighted(pool, exerciseWeight);
+  state.screen = 'practice';
+  state.vocabPractice = {
+    pool:pool, category:category, current:first, seenIds:new Set([first.id]), allCovered:false, showAnswer:false,
+    sessionCorrect:0, sessionTotal:0, sessionCurrentStreak:0, sessionBestStreak:0, startTime:Date.now()
+  };
+  render();
+  window.scrollTo(0,0);
+}
+function renderVocabPracticeScreen(){
+  const ctx = state.vocabPractice, v = ctx.current;
+  let html = '<div class="exercise-wrap">';
+  html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="vocab-practice-stop">'+icon('close',15)+' Terminar</button></div>';
+  html += '<div class="exercise-card">';
+  html += '<div class="ex-topic-tag">'+escapeHtml(v.category||'')+'</div>';
+  html += '<div class="row-between" style="align-items:flex-start; gap:8px; margin-top:6px;"><div class="ex-title">'+escapeHtml(v.term)+(ctx.showAnswer && v.translationEs?' <span class="vocab-term-tr">('+escapeHtml(v.translationEs)+')</span>':'')+'</div>'+speakBtnHtml(v.term)+'</div>';
+  if(v.phonetic) html += '<div class="vocab-phonetic">'+escapeHtml(v.phonetic)+'</div>';
+  if(ctx.showAnswer){
+    html += '<div class="vocab-def" style="margin-top:14px;">'+escapeHtml(v.description||'')+'</div>';
+    if(v.example) html += '<div class="vocab-example">"'+escapeHtml(v.example)+'"</div>';
+  } else {
+    html += '<div class="footnote" style="margin-top:18px;">Intenta recordar el significado antes de ver la respuesta.</div>';
+  }
+  html += '</div></div>';
+  let actions;
+  if(!ctx.showAnswer){
+    actions = '<button class="btn btn-primary" data-action="vocab-reveal">Mostrar respuesta</button>';
+  } else {
+    actions = '<div class="btn-block-row"><button class="btn btn-danger" data-action="vocab-grade-wrong" style="flex:1;">No lo sabía</button><button class="btn btn-primary" data-action="vocab-grade-right" style="flex:1;">Lo sabía</button></div>';
+  }
+  html += '<div class="runner-actions">'+actions+'</div>';
+  return html;
+}
+function renderVocabCovered(){
+  const ctx = state.vocabPractice;
+  let html = '<div class="exercise-wrap">';
+  html += '<div class="session-meta"><span class="footnote">Sesión: '+ctx.sessionCorrect+'/'+ctx.sessionTotal+' correctas</span><button class="text-action-btn danger" data-action="vocab-practice-stop">'+icon('close',15)+' Terminar</button></div>';
+  html += '<div class="empty-state"><div class="es-icon">🎉</div><h3 class="title3">Ya has repasado todo el vocabulario</h3><p>Has practicado las '+ctx.pool.length+' palabras disponibles'+(ctx.category!=='all'?' de «'+escapeHtml(ctx.category)+'»':'')+'. ¿Qué quieres hacer?</p></div>';
+  html += '<button class="btn btn-primary" data-action="vocab-continue">'+icon('dumbbell',18)+' Seguir practicando</button>';
+  html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="vocab-finish-session">Finalizar sesión</button>';
+  html += '</div>';
+  return html;
+}
+function renderVocabPracticeSummary(){
+  const r = state.vocabPracticeResult;
+  let html = '<div class="center-col" style="padding:14px 0 6px;">';
+  html += '<div style="font-size:44px; margin-bottom:6px;">🏁</div>';
+  html += '<div class="title2">Sesión completada</div>';
+  html += '<div class="footnote">Vocabulario · '+escapeHtml(r.category==='all'?'Todas las categorías':r.category)+'</div>';
+  html += '</div>';
+  html += '<div class="stat-grid">' +
+    '<div class="stat-card"><div class="stat-num">'+formatDuration(r.durationMs)+'</div><div class="stat-label">Tiempo de estudio</div></div>' +
+    '<div class="stat-card"><div class="stat-num">'+r.sessionTotal+'</div><div class="stat-label">Palabras repasadas</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:var(--success);">'+r.sessionCorrect+'</div><div class="stat-label">Las sabías</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:var(--danger);">'+r.errors+'</div><div class="stat-label">No las sabías</div></div>' +
+    '<div class="stat-card"><div class="stat-num" style="color:'+accColor(r.sessionTotal?r.accuracy:null)+';">'+(r.sessionTotal?r.accuracy+'%':'—')+'</div><div class="stat-label">Precisión</div></div>' +
+    '<div class="stat-card"><div class="stat-num">'+r.bestStreak+'</div><div class="stat-label">Mejor racha</div></div>' +
+  '</div>';
+  html += '<button class="btn btn-primary" data-action="vocab-summary-again">'+icon('dumbbell',18)+' Practicar de nuevo</button>';
+  html += '<button class="btn btn-secondary" style="margin-top:10px;" data-action="vocab-summary-home">Volver a Inicio</button>';
+  return html;
+}
+function revealVocabAnswer(){
+  state.vocabPractice.showAnswer = true;
+  render();
+}
+function gradeVocab(isCorrect){
+  const ctx = state.vocabPractice, v = ctx.current;
+  ctx.sessionTotal++;
+  if(isCorrect){ ctx.sessionCorrect++; ctx.sessionCurrentStreak++; ctx.sessionBestStreak = Math.max(ctx.sessionBestStreak, ctx.sessionCurrentStreak); }
+  else { ctx.sessionCurrentStreak = 0; }
+  recordAnswer(v, isCorrect);
+  beep(isCorrect?880:220, 160);
+  const remaining = ctx.pool.filter(x=>!ctx.seenIds.has(x.id));
+  if(remaining.length===0){ ctx.allCovered = true; render(); return; }
+  const next = pickWeighted(remaining, exerciseWeight);
+  ctx.seenIds.add(next.id);
+  ctx.current = next; ctx.showAnswer = false;
+  render();
+  window.scrollTo(0,0);
+}
+function continueVocabRound(){
+  const ctx = state.vocabPractice;
+  if(!ctx) return;
+  ctx.seenIds = new Set();
+  ctx.allCovered = false;
+  const others = ctx.pool.length>1 ? ctx.pool.filter(x=>x.id!==ctx.current.id) : ctx.pool;
+  const next = pickWeighted(others, exerciseWeight);
+  ctx.seenIds.add(next.id);
+  ctx.current = next; ctx.showAnswer = false;
+  render();
+  window.scrollTo(0,0);
+}
+function finishVocabPracticeSession(){
+  const ctx = state.vocabPractice;
+  if(!ctx){ setScreen('home'); return; }
+  state.vocabPracticeResult = {
+    category: ctx.category,
+    sessionCorrect: ctx.sessionCorrect, sessionTotal: ctx.sessionTotal, errors: ctx.sessionTotal-ctx.sessionCorrect,
+    accuracy: ctx.sessionTotal>0 ? Math.round(ctx.sessionCorrect/ctx.sessionTotal*100) : 0,
+    bestStreak: ctx.sessionBestStreak, durationMs: Date.now()-ctx.startTime
+  };
+  state.vocabPractice = null;
+  render();
+  window.scrollTo(0,0);
 }
 
 
@@ -1287,7 +1460,7 @@ function renderExerciseRunner(mode){
         actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
       }
     } else if(!us.itemChecked[itemIdx]){
-      if(!unitAutoCheck(u)) actions = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
+      if(!unitAutoCheck(u) && canCheckItem(u,us,itemIdx)) actions = '<button class="btn btn-primary" data-action="practice-check">Comprobar</button>';
     } else if(u.items.length===1){
       actions = '<button class="btn btn-primary" data-action="practice-next">Siguiente</button>';
     } else {
@@ -1380,8 +1553,26 @@ function renderSingleItem(kind, ex, us, i, checked){
       else if(val===j) c += ' selected';
       return '<button type="button" class="'+c+'" data-mc="'+i+':'+j+'" '+(checked?'disabled':'')+'><span class="opt-letter">'+String.fromCharCode(65+j)+'</span><span>'+escapeHtml(opt)+'</span></button>';
     }).join('');
+  } else if(kind==='reorder'){
+    body = num + (ex.prompt?escapeHtml(ex.prompt):'Ordena la frase:') + renderReorderItem(ex, us, i, checked);
+    const speakWrap = '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div></div>';
+    return speakWrap;
   }
   return '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div>'+speakBtnHtml(ex.prompt)+'</div>';
+}
+function renderReorderItem(ex, us, i, checked){
+  const bank = us.reorderBanks[i];
+  const placed = us.answers[i];
+  const placedIdx = us.reorderPlaced[i];
+  const usedSet = new Set(placedIdx);
+  let html = '<div class="reorder-answer">' + (placed.length
+    ? placed.map((w,pos)=>'<button type="button" class="reorder-chip placed" data-reorder-remove="'+i+':'+pos+'" '+(checked?'disabled':'')+'>'+escapeHtml(w)+'</button>').join('')
+    : '<span class="footnote">Toca las palabras en el orden correcto</span>') + '</div>';
+  if(!checked){
+    html += '<div class="reorder-bank">' + bank.map((w,bi)=> usedSet.has(bi) ? '' : '<button type="button" class="reorder-chip" data-reorder-add="'+i+':'+bi+'">'+escapeHtml(w)+'</button>').join('') + '</div>';
+  }
+  if(checked && !us.results[i]) html += '<div class="unit-correct">✓ '+escapeHtml(ex.correctOrder.join(' '))+'</div>';
+  return html;
 }
 
 
@@ -1537,6 +1728,9 @@ function renderVocab(){
         (v.example?'<div class="vocab-example">"'+escapeHtml(v.example)+'"</div>':'') +
         '</div>';
     }).join('') + '</div>';
+  }
+  if(DATA.vocabulary.length){
+    html += '<button class="btn btn-primary" data-action="vocab-practice-start" style="margin:4px 0 14px;">'+icon('dumbbell',18)+' Practicar vocabulario'+(state.vocabFilterCategory!=='all'?' · '+escapeHtml(state.vocabFilterCategory):'')+'</button>';
   }
   html += '<button class="fab" data-action="add-vocab">'+icon('plus',26)+'</button>';
   return html;
@@ -1695,7 +1889,8 @@ const KIND_FORMAT = {
   true_false:{hint:'Una afirmación por línea: afirmación | verdadero (o falso).', ph:"The motherboard stores data permanently. | falso\nThe RAM is temporary memory. | verdadero"},
   multiple_choice:{hint:'Separa cada pregunta con una línea en blanco. Primera línea = pregunta; las siguientes = opciones. Marca la correcta con * al principio.', ph:"What is the brain of the computer?\nRAM\n*CPU\nHard drive\n\nWhich device is an input device?\nMonitor\n*Keyboard\nSpeaker"},
   matching:{hint:'Una pareja por línea: palabra | definición o traducción. Arrastrarás cada palabra sobre su significado.', ph:"Laptop | A portable computer you can carry with you\nTablet | A flat portable device with a touchscreen"},
-  word_bank:{hint:'Una frase por línea: frase con ___ | palabra correcta. El banco se forma con las palabras correctas (más los distractores opcionales).', ph:"The ___ is the brain of the computer. | CPU\nThe ___ stores your files permanently. | hard drive"}
+  word_bank:{hint:'Una frase por línea: frase con ___ | palabra correcta. El banco se forma con las palabras correctas (más los distractores opcionales).', ph:"The ___ is the brain of the computer. | CPU\nThe ___ stores your files permanently. | hard drive"},
+  reorder:{hint:'Una frase por línea, escrita en el orden correcto (se mostrará desordenada para que el usuario la reconstruya).', ph:"They always work on Saturdays.\nShe sometimes reads books in the evening."}
 };
 
 function parseBlockItems(kind, text){
@@ -1712,6 +1907,14 @@ function parseBlockItems(kind, text){
       });
       if(correct<0){ errors.push('Pregunta '+(ci+1)+': marca la opción correcta con *'); return; }
       items.push({type:'multiple_choice', prompt:lines[0], options:opts, correctIndex:correct});
+    });
+    return {items:items, errors:errors};
+  }
+  if(kind==='reorder'){
+    raw.split('\n').map(l=>l.trim()).filter(Boolean).forEach((line,li)=>{
+      const words = line.split(/\s+/).filter(Boolean);
+      if(words.length<2){ errors.push('Línea '+(li+1)+': la frase necesita al menos 2 palabras'); return; }
+      items.push({type:'reorder', prompt:'', correctOrder:words});
     });
     return {items:items, errors:errors};
   }
@@ -1742,6 +1945,7 @@ function serializeItems(kind, items){
   if(kind==='multiple_choice'){
     return items.map(it=>it.prompt+'\n'+it.options.map((o,j)=>(j===it.correctIndex?'*':'')+o).join('\n')).join('\n\n');
   }
+  if(kind==='reorder') return items.map(it=>it.correctOrder.join(' ')).join('\n');
   return items.map(it=>{
     if(kind==='true_false') return it.prompt+' | '+(it.correctBool?'verdadero':'falso');
     if(kind==='word_bank') return it.prompt+' | '+it.correctAnswer;
@@ -1878,6 +2082,8 @@ function afterRender(){
   document.querySelectorAll('[data-practice-block]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({blockId:btn.getAttribute('data-practice-block')}); }; });
   document.querySelectorAll('[data-practice-kind]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({kind:btn.getAttribute('data-practice-kind'), category:state.studyCategory}); }; });
   const practiceGlobalBtn = document.querySelector('[data-action="practice-global"]'); if(practiceGlobalBtn) practiceGlobalBtn.onclick=()=>{ startPracticeSession({category:state.studyCategory}); };
+  const reviewExBtn = document.querySelector('[data-action="review-due-exercises"]'); if(reviewExBtn) reviewExBtn.onclick=()=> startPracticeSession({});
+  const reviewVocBtn = document.querySelector('[data-action="review-due-vocab"]'); if(reviewVocBtn) reviewVocBtn.onclick=()=> startVocabPractice('all');
 
   // exam setup
   document.querySelectorAll('[data-ecat]').forEach(chip=>{
@@ -1923,6 +2129,7 @@ function afterRender(){
   document.querySelectorAll('[data-del-block]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-block'); showConfirm('¿Eliminar este ejercicio y todas sus preguntas?','Eliminar',true).then(ok=>{ if(ok) deleteBlock(id); }); }; });
 
   const addVocBtn = document.querySelector('[data-action="add-vocab"]'); if(addVocBtn) addVocBtn.onclick=()=>openVocabModal(null);
+  const vocabPracticeBtn = document.querySelector('[data-action="vocab-practice-start"]'); if(vocabPracticeBtn) vocabPracticeBtn.onclick=()=> startVocabPractice(state.vocabFilterCategory);
   document.querySelectorAll('[data-edit-voc]').forEach(b=>{ b.onclick=()=>openVocabModal(b.getAttribute('data-edit-voc')); });
   document.querySelectorAll('[data-del-voc]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-voc'); showConfirm('¿Eliminar esta palabra?','Eliminar',true).then(ok=>{ if(ok) deleteVocab(id); }); }; });
 
@@ -2091,6 +2298,26 @@ function startPracticeSession(filter){
   window.scrollTo(0,0);
 }
 function wireRunnerEvents(){
+  if(state.screen==='practice' && state.vocabPracticeResult){
+    const again = document.querySelector('[data-action="vocab-summary-again"]');
+    if(again) again.onclick = ()=>{ const c = state.vocabPracticeResult.category; state.vocabPracticeResult = null; startVocabPractice(c); };
+    const home = document.querySelector('[data-action="vocab-summary-home"]');
+    if(home) home.onclick = ()=> setScreen('home');
+    return;
+  }
+  if(state.screen==='practice' && state.vocabPractice){
+    const stop = document.querySelector('[data-action="vocab-practice-stop"]');
+    if(stop) stop.onclick = ()=>{ showConfirm('¿Seguro que quieres terminar?', 'Sí', true, 'No').then(ok=>{ if(ok) finishVocabPracticeSession(); }); };
+    if(state.vocabPractice.allCovered){
+      const cont = document.querySelector('[data-action="vocab-continue"]'); if(cont) cont.onclick = ()=> continueVocabRound();
+      const fin = document.querySelector('[data-action="vocab-finish-session"]'); if(fin) fin.onclick = ()=> finishVocabPracticeSession();
+      return;
+    }
+    const reveal = document.querySelector('[data-action="vocab-reveal"]'); if(reveal) reveal.onclick = ()=> revealVocabAnswer();
+    const right = document.querySelector('[data-action="vocab-grade-right"]'); if(right) right.onclick = ()=> gradeVocab(true);
+    const wrong = document.querySelector('[data-action="vocab-grade-wrong"]'); if(wrong) wrong.onclick = ()=> gradeVocab(false);
+    return;
+  }
   if(state.screen==='practice' && state.practiceResult){
     const again = document.querySelector('[data-action="practice-summary-again"]');
     if(again) again.onclick = ()=>{
@@ -2144,6 +2371,24 @@ function wireRunnerEvents(){
       const parts = btn.getAttribute('data-tf').split(':');
       us.answers[Number(parts[0])] = (parts[1]==='true');
       changed();
+    };
+  });
+  document.querySelectorAll('[data-reorder-add]').forEach(btn=>{
+    btn.onclick = ()=>{
+      if(itemLocked) return;
+      const parts = btn.getAttribute('data-reorder-add').split(':').map(Number);
+      us.reorderPlaced[parts[0]].push(parts[1]);
+      us.answers[parts[0]] = us.reorderPlaced[parts[0]].map(bi=>us.reorderBanks[parts[0]][bi]);
+      render();
+    };
+  });
+  document.querySelectorAll('[data-reorder-remove]').forEach(btn=>{
+    btn.onclick = ()=>{
+      if(itemLocked) return;
+      const parts = btn.getAttribute('data-reorder-remove').split(':').map(Number);
+      us.reorderPlaced[parts[0]].splice(parts[1], 1);
+      us.answers[parts[0]] = us.reorderPlaced[parts[0]].map(bi=>us.reorderBanks[parts[0]][bi]);
+      render();
     };
   });
   const inputs = Array.from(document.querySelectorAll('[data-unit-input]'));
