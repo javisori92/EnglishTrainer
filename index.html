@@ -163,6 +163,9 @@ a{color:var(--accent); text-decoration:none;}
 /* Cards & lists */
 .card{background:var(--card); border-radius:var(--radius-m); box-shadow:var(--shadow); padding:16px; margin-bottom:12px;}
 .section-label{font-size:13px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.03em; margin:18px 4px 8px;}
+.section-label-row{display:flex; align-items:center; justify-content:space-between; width:100%; background:none; border:none; padding:0; margin:18px 0 8px;}
+.section-label-row .section-label{margin:0 4px;}
+.section-chevron{display:flex; color:var(--text-tertiary); transition:transform .15s ease; margin-right:4px;}
 .section-label:first-child{margin-top:4px;}
 .list{background:var(--card); border-radius:var(--radius-m); overflow:hidden; box-shadow:var(--shadow); margin-bottom:12px;}
 .list-row{
@@ -995,6 +998,7 @@ let state = {
   vocabFilterCategory: 'all',
   vocabSearch: '',
   vocabTranslateShown: {},
+  homeAchievementsCollapsed: false,
   practice: null,   // {pool, filter, current, us, seenIds, allCovered, sessionCorrect, sessionTotal, startTime}
   practiceResult: null, // resumen de la sesión de práctica al finalizar
   vocabPractice: null,  // {pool, category, current, seenIds, allCovered, showAnswer, sessionCorrect, sessionTotal, startTime}
@@ -1118,11 +1122,14 @@ function renderHome(){
   const unlocked = DATA.achievements.filter(a=>DATA.unlockedAchievementIds.includes(a.id));
   const locked = DATA.achievements.filter(a=>!DATA.unlockedAchievementIds.includes(a.id));
   if(DATA.achievements.length){
-    html += '<div class="section-label">Logros ('+unlocked.length+'/'+DATA.achievements.length+')</div>';
-    html += '<div class="ach-grid">' + DATA.achievements.slice(0,8).map(a=>{
-      const isUnlocked = DATA.unlockedAchievementIds.includes(a.id);
-      return '<div class="ach-item '+(isUnlocked?'':'locked')+'"><div class="ach-icon">'+(a.icon||'🏆')+'</div><div class="ach-name">'+escapeHtml(a.name)+'</div></div>';
-    }).join('') + '</div>';
+    const collapsed = !!state.homeAchievementsCollapsed;
+    html += '<button type="button" class="section-label-row" data-action="toggle-achievements"><span class="section-label">Logros ('+unlocked.length+'/'+DATA.achievements.length+')</span><span class="section-chevron" style="transform:rotate('+(collapsed?'0':'90')+'deg);">'+icon('chevright',14)+'</span></button>';
+    if(!collapsed){
+      html += '<div class="ach-grid">' + DATA.achievements.slice(0,8).map(a=>{
+        const isUnlocked = DATA.unlockedAchievementIds.includes(a.id);
+        return '<div class="ach-item '+(isUnlocked?'':'locked')+'"><div class="ach-icon">'+(a.icon||'🏆')+'</div><div class="ach-name">'+escapeHtml(a.name)+'</div></div>';
+      }).join('') + '</div>';
+    }
   }
 
   if(DATA.topics.length){
@@ -2082,6 +2089,7 @@ function afterRender(){
   document.querySelectorAll('[data-practice-block]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({blockId:btn.getAttribute('data-practice-block')}); }; });
   document.querySelectorAll('[data-practice-kind]').forEach(btn=>{ btn.onclick=()=>{ startPracticeSession({kind:btn.getAttribute('data-practice-kind'), category:state.studyCategory}); }; });
   const practiceGlobalBtn = document.querySelector('[data-action="practice-global"]'); if(practiceGlobalBtn) practiceGlobalBtn.onclick=()=>{ startPracticeSession({category:state.studyCategory}); };
+  const toggleAchBtn = document.querySelector('[data-action="toggle-achievements"]'); if(toggleAchBtn) toggleAchBtn.onclick=()=>{ state.homeAchievementsCollapsed = !state.homeAchievementsCollapsed; render(); };
   const reviewExBtn = document.querySelector('[data-action="review-due-exercises"]'); if(reviewExBtn) reviewExBtn.onclick=()=> startPracticeSession({});
   const reviewVocBtn = document.querySelector('[data-action="review-due-vocab"]'); if(reviewVocBtn) reviewVocBtn.onclick=()=> startVocabPractice('all');
 
