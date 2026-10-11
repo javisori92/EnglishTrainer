@@ -10,6 +10,7 @@
   --bg:#F2F2F7;
   --bg-elevated:#FFFFFF;
   --bg-secondary:#E5E5EA;
+  --segment-active:#FFFFFF;
   --card:#FFFFFF;
   --text:#1C1C1E;
   --text-secondary:#6E6E73;
@@ -37,7 +38,8 @@
   :root:not([data-theme="light"]){
     --bg:#000000;
     --bg-elevated:#1C1C1E;
-    --bg-secondary:#1C1C1E;
+    --bg-secondary:#2C2C2E;
+    --segment-active:#636366;
     --card:#1C1C1E;
     --text:#FFFFFF;
     --text-secondary:#98989D;
@@ -58,7 +60,8 @@
 :root[data-theme="dark"]{
   --bg:#000000;
   --bg-elevated:#1C1C1E;
-  --bg-secondary:#1C1C1E;
+  --bg-secondary:#2C2C2E;
+  --segment-active:#636366;
   --card:#1C1C1E;
   --text:#FFFFFF;
   --text-secondary:#98989D;
@@ -118,8 +121,8 @@ a{color:var(--accent); text-decoration:none;}
 .topbar-actions{display:flex; gap:8px; align-items:center;}
 
 #content{flex:1; padding:8px 16px calc(var(--tabbar-h) + 28px); max-width:760px; width:100%; margin:0 auto; box-sizing:border-box;}
-#content.content-centered{display:flex; flex-direction:column;}
-.home-empty{flex:1; display:flex; align-items:center; justify-content:center; text-align:center;}
+#content.has-fab{padding-bottom:calc(var(--tabbar-h) + var(--safe-b) + 92px);}
+@media (min-width:900px){ #content.has-fab{padding-bottom:104px;} }
 @media (min-width: 900px){
   #content{padding-bottom:32px;}
 }
@@ -239,7 +242,7 @@ a{color:var(--accent); text-decoration:none;}
 /* Segmented control */
 .segmented{display:flex; background:var(--bg-secondary); border-radius:10px; padding:3px; gap:2px;}
 .segmented button{flex:1; border:none; background:none; padding:8px 6px; border-radius:8px; font-size:13px; font-weight:600; color:var(--text-secondary);}
-.segmented button.active{background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.15);}
+.segmented button.active{background:var(--segment-active); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.15);}
 
 /* Chips */
 .chip-row{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;}
@@ -275,7 +278,7 @@ a{color:var(--accent); text-decoration:none;}
 .streak-dot.on{background:#fff;}
 
 .topic-bar-row{margin-bottom:10px;}
-.topic-bar-track{height:8px; border-radius:4px; background:var(--bg-secondary); overflow:hidden; margin-top:6px;}
+.topic-bar-track{height:8px; border-radius:4px; background:var(--separator); overflow:hidden; margin-top:6px;}
 .goal-mini{display:flex; flex-direction:column; gap:5px; flex:0 1 200px; min-width:0;}
 .goal-mini-label{font-size:12px; font-weight:700; color:var(--text-secondary);}
 .goal-mini-bar{display:flex; align-items:center; gap:8px;}
@@ -320,7 +323,6 @@ a{color:var(--accent); text-decoration:none;}
   box-sizing:content-box; display:inline-block; width:5ch; min-width:0; max-width:100%; margin:2px 4px; padding:6px 10px;
   border:none; border-bottom:2px solid var(--accent); border-radius:8px 8px 0 0; background:var(--bg-secondary);
   font-size:16px; font-weight:600; color:var(--text); outline:none; vertical-align:middle;
-  transition:width .08s ease;
 }
 .inline-input.block-input{box-sizing:border-box; display:block; width:100%; margin:8px 0 0;}
 .inline-input.correct{border-color:var(--success); background:var(--success-soft); color:var(--success);}
@@ -580,10 +582,44 @@ function normalizeData(parsed){
     dailyProgress: Object.assign(d.dailyProgress, parsed.dailyProgress||{})
   });
   migrateToBlocks(out);
+  migrateVocabulary(out);
+  sanitizeItems(out);
   return out;
 }
 // Los ejercicios antiguos (una sola pregunta suelta) pasan a ser bloques de una pregunta,
 // conservando su id (y por tanto su progreso). Los "emparejar" con pares se dividen en preguntas.
+// Descarta registros dañados (p. ej. de un archivo importado a mano) para que no rompan las pantallas.
+// Ojo: se ejecuta durante la carga inicial, así que no puede usar constantes declaradas más abajo (KIND_META...).
+function sanitizeItems(d){
+  const kinds = ['fill_blank','multiple_choice','true_false','translation','matching','word_bank','reorder'];
+  const dropped = [];
+  d.blocks = d.blocks.filter(b=>{ const ok = b && typeof b==='object' && kinds.includes(b.kind); if(!ok) dropped.push(b); return ok; });
+  const kindOf = {};
+  d.blocks.forEach(b=>{ kindOf[b.id] = b.kind; });
+  const isStr = v=>typeof v==='string';
+  const okItem = ex=>{
+    if(!ex || typeof ex!=='object' || kindOf[ex.blockId]===undefined || kindOf[ex.blockId]!==ex.type || !isStr(ex.prompt)) return false;
+    switch(ex.type){
+      case 'multiple_choice': return Array.isArray(ex.options) && ex.options.length>=2 && ex.options.every(isStr) && Number.isInteger(ex.correctIndex) && ex.correctIndex>=0 && ex.correctIndex<ex.options.length;
+      case 'true_false': return typeof ex.correctBool==='boolean';
+      case 'fill_blank': case 'translation': return Array.isArray(ex.acceptedAnswers) && ex.acceptedAnswers.length>0 && ex.acceptedAnswers.every(isStr);
+      case 'matching': case 'word_bank': return isStr(ex.correctAnswer) && ex.correctAnswer.trim()!=='';
+      case 'reorder': return Array.isArray(ex.correctOrder) && ex.correctOrder.length>=2 && ex.correctOrder.every(isStr);
+      default: return false;
+    }
+  };
+  d.exercises = d.exercises.filter(ex=>{ const ok = okItem(ex); if(!ok) dropped.push(ex); return ok; });
+  if(dropped.length){
+    try{ localStorage.setItem(STORAGE_KEY+'_backup_dropped', JSON.stringify({date:Date.now(), dropped:dropped})); }catch(e){}
+  }
+}
+// Vocabulario de versiones anteriores: la descripción se llamaba definitionEn y la categoría no existía.
+function migrateVocabulary(d){
+  d.vocabulary.forEach(v=>{
+    if(v.description===undefined && v.definitionEn!==undefined) v.description = v.definitionEn;
+    if(!v.category) v.category = 'Sin categoría';
+  });
+}
 function migrateToBlocks(d){
   const blockIds = new Set(d.blocks.map(b=>b.id));
   const items = [];
@@ -614,11 +650,16 @@ function migrateToBlocks(d){
   d.exercises = items;
 }
 function loadData(){
+  let raw = null;
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return defaultData();
     return normalizeData(JSON.parse(raw));
-  }catch(e){ return defaultData(); }
+  }catch(e){
+    // No perdemos los datos: copia del texto original antes de que un guardado posterior lo sobrescriba.
+    try{ if(raw) localStorage.setItem(STORAGE_KEY+'_backup_unreadable', raw); }catch(e2){}
+    return defaultData();
+  }
 }
 let saveTimer=null;
 function save(){
@@ -721,6 +762,12 @@ function blockAccuracy(b){
 }
 
 /* ======================= STREAK ======================= */
+// Racha que se muestra: si hace más de un día que no practicas, ya está rota (aunque aún no se haya guardado).
+function currentStreakValue(){
+  const st = DATA.streak;
+  if(!st.lastActiveDate) return 0;
+  return daysBetween(st.lastActiveDate, todayStr()) <= 1 ? st.current : 0;
+}
 function registerActivity(){
   const today = todayStr();
   const s = DATA.streak;
@@ -982,7 +1029,7 @@ function unitValues(u, us){
   if(ASSIGN_KINDS.includes(u.kind)) return u.items.map((_,i)=> us.placed[i]!=null ? us.pool[us.placed[i]] : null);
   return us.answers.slice();
 }
-function unitHasAnswers(u, us){ return unitValues(u, us).some(v=>v!==null && v!==undefined && v!==''); }
+function unitHasAnswers(u, us){ return unitValues(u, us).some(isAnswered); }
 function unitAutoCheck(u){
   if(ASSIGN_KINDS.includes(u.kind)) return u.items.length===1;
   return ['multiple_choice','true_false'].includes(u.kind);
@@ -1098,18 +1145,23 @@ function render(){
   renderSidebar();
   const c = document.getElementById('content');
   let html = '';
-  switch(state.screen){
-    case 'home': html = renderHome(); break;
-    case 'study': html = state.studyTopicId ? renderStudyTopic() : renderStudyList(); break;
-    case 'practice': html = renderPractice(); break;
-    case 'exam': html = renderExam(); break;
-    case 'vocab': html = renderVocab(); break;
-    case 'content': html = renderContent(); break;
-    case 'settings': html = renderSettings(); break;
-    default: html = renderHome();
+  try{
+    switch(state.screen){
+      case 'home': html = renderHome(); break;
+      case 'study': html = state.studyTopicId ? renderStudyTopic() : renderStudyList(); break;
+      case 'practice': html = renderPractice(); break;
+      case 'exam': html = renderExam(); break;
+      case 'vocab': html = renderVocab(); break;
+      case 'content': html = renderContent(); break;
+      case 'settings': html = renderSettings(); break;
+      default: html = renderHome();
+    }
+  }catch(err){
+    console.error('Error al dibujar la pantalla:', err);
+    html = '<div class="empty-state"><div class="es-icon">⚠️</div><h3 class="title3">No se pudo mostrar esta pantalla</h3><p>Es posible que haya algún dato dañado. Puedes ir a otra sección o revisar tus datos en Ajustes (allí puedes exportarlos o restablecerlos).</p><button class="btn btn-primary" data-nav="settings" style="width:auto; padding-left:24px; padding-right:24px;">Ir a Ajustes</button></div>';
   }
   c.innerHTML = html;
-  c.classList.toggle('content-centered', state.screen==='home' && homeIsEmpty());
+  c.classList.toggle('has-fab', !!c.querySelector('.fab'));
   afterRender();
 }
 
@@ -1122,14 +1174,15 @@ function emptyCourseCard(){
   return '<div class="empty-state"><div class="es-icon">🌱</div><h3 class="title3">Empieza a construir tu curso</h3><p>Añade temas, ejercicios y vocabulario en la sección Gestionar Contenido. Luego practica y esta app aprenderá de tus errores.</p><button class="btn btn-primary" data-nav="content" style="width:auto; padding-left:24px; padding-right:24px;">'+icon('plus',18)+' Añadir contenido</button></div>';
 }
 function renderHome(){
-  if(homeIsEmpty()) return '<div class="home-empty">'+emptyCourseCard()+'</div>';
+  if(homeIsEmpty()) return emptyCourseCard();
   const hasContent = DATA.topics.length>0 && DATA.exercises.length>0;
   const s = DATA.streak;
+  const streakNow = currentStreakValue();
   const days = last7Days();
   const dots = days.map(d=>'<div class="streak-dot '+(s.activeDates.includes(d)?'on':'')+'"></div>').join('');
   let html = '';
 
-  html += '<div class="streak-card"><div class="streak-top"><div class="streak-flame">🔥</div><div><div class="streak-num">'+s.current+' día'+(s.current===1?'':'s')+'</div><div class="streak-sub">Racha actual · récord '+s.longest+'</div></div></div><div class="streak-dots">'+dots+'</div></div>';
+  html += '<div class="streak-card"><div class="streak-top"><div class="streak-flame">🔥</div><div><div class="streak-num">'+streakNow+' día'+(streakNow===1?'':'s')+'</div><div class="streak-sub">Racha actual · récord '+s.longest+'</div></div></div><div class="streak-dots">'+dots+'</div></div>';
 
   const goal = DATA.settings.dailyGoal||15;
   const todayCount = DATA.dailyProgress.date===todayStr() ? DATA.dailyProgress.count : 0;
@@ -1173,12 +1226,11 @@ function renderHome(){
   }
 
   const unlocked = DATA.achievements.filter(a=>DATA.unlockedAchievementIds.includes(a.id));
-  const locked = DATA.achievements.filter(a=>!DATA.unlockedAchievementIds.includes(a.id));
   if(DATA.achievements.length){
     const collapsed = !!state.homeAchievementsCollapsed;
     html += '<button type="button" class="section-label-row" data-action="toggle-achievements"><span class="section-label">Logros ('+unlocked.length+'/'+DATA.achievements.length+')</span><span class="section-chevron" style="transform:rotate('+(collapsed?'0':'90')+'deg);">'+icon('chevright',14)+'</span></button>';
     if(!collapsed){
-      html += '<div class="ach-grid">' + DATA.achievements.slice(0,8).map(a=>{
+      html += '<div class="ach-grid">' + DATA.achievements.map(a=>{
         const isUnlocked = DATA.unlockedAchievementIds.includes(a.id);
         return '<div class="ach-item '+(isUnlocked?'':'locked')+'"><div class="ach-icon">'+(a.icon||'🏆')+'</div><div class="ach-name">'+escapeHtml(a.name)+'</div></div>';
       }).join('') + '</div>';
@@ -1685,7 +1737,7 @@ function renderAssignBoard(u, us, checked){
     } else {
       row = '<div class="assign-row match"><div class="assign-label">'+num+escapeHtml(ex.prompt)+'</div>'+slotHtml(i)+'</div>';
     }
-    if(checked && !us.results[i]) row += '<div class="unit-correct assign-fix">✓ '+escapeHtml(ex.correctAnswer)+'</div>';
+    if(checked && !us.results[i] && us.placed[i]!=null) row += '<div class="unit-correct assign-fix">✓ '+escapeHtml(ex.correctAnswer)+'</div>';
     html += row;
   });
   html += '</div>';
@@ -1793,6 +1845,9 @@ function renderVocab(){
     html += categories.map(c=>'<button class="chip '+(state.vocabFilterCategory===c?'active':'')+'" data-vcategory="'+escapeHtml(c)+'">'+escapeHtml(c)+'</button>').join('');
     html += '</div>';
   }
+  if(DATA.vocabulary.length){
+    html += '<button class="btn btn-primary" data-action="vocab-practice-start" style="margin:0 0 14px;">'+icon('dumbbell',18)+' Practicar vocabulario'+(state.vocabFilterCategory!=='all'?' · '+escapeHtml(state.vocabFilterCategory):'')+'</button>';
+  }
   let list = DATA.vocabulary.slice();
   if(state.vocabFilterCategory!=='all') list = list.filter(v=>v.category===state.vocabFilterCategory);
   if(state.vocabSearch.trim()) list = list.filter(v=> v.term.toLowerCase().includes(state.vocabSearch.trim().toLowerCase()));
@@ -1813,9 +1868,6 @@ function renderVocab(){
         (v.example?'<div class="vocab-example">"'+escapeHtml(v.example)+'"</div>':'') +
         '</div>';
     }).join('') + '</div>';
-  }
-  if(DATA.vocabulary.length){
-    html += '<button class="btn btn-primary" data-action="vocab-practice-start" style="margin:4px 0 14px;">'+icon('dumbbell',18)+' Practicar vocabulario'+(state.vocabFilterCategory!=='all'?' · '+escapeHtml(state.vocabFilterCategory):'')+'</button>';
   }
   html += '<button class="fab" data-action="add-vocab">'+icon('plus',26)+'</button>';
   return html;
@@ -2298,7 +2350,19 @@ function wireModalActions(){
       block = {id:uid(), topicId:topicId, kind:kind, title:title, hint:hint, explanation:explanation, extraWords:extraWords, createdAt:Date.now()};
       DATA.blocks.push(block);
     }
-    const newItems = parsed.items.map((it,i)=>Object.assign({id:(old[i]?old[i].id:uid()), blockId:block.id, topicId:topicId, createdAt:(old[i]?old[i].createdAt:Date.now())}, it));
+    // El historial de cada pregunta se asocia por su contenido, no por su posición: así insertar o reordenar
+    // líneas no lo desplaza. Las preguntas editadas (erratas) heredan el de las que quedan sin pareja.
+    const itemKey = it=> it.type==='reorder' ? 'r|'+it.correctOrder.join(' ') : it.type+'|'+it.prompt;
+    const oldPool = old.slice();
+    const reuse = parsed.items.map(()=>null);
+    parsed.items.forEach((it,i)=>{
+      const k = itemKey(it);
+      const j = oldPool.findIndex(o=>o && itemKey(o)===k);
+      if(j>=0){ reuse[i] = oldPool[j]; oldPool[j] = null; }
+    });
+    const leftovers = oldPool.filter(Boolean);
+    parsed.items.forEach((it,i)=>{ if(!reuse[i] && leftovers.length) reuse[i] = leftovers.shift(); });
+    const newItems = parsed.items.map((it,i)=>Object.assign({id:(reuse[i]?reuse[i].id:uid()), blockId:block.id, topicId:topicId, createdAt:(reuse[i]?reuse[i].createdAt:Date.now())}, it));
     const keep = new Set(newItems.map(n=>n.id));
     itemsOfBlock(block).forEach(o=>{ if(!keep.has(o.id)) delete DATA.progress[o.id]; });
     DATA.exercises = DATA.exercises.filter(e=>e.blockId!==block.id).concat(newItems);
