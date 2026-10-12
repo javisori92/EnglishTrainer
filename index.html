@@ -384,6 +384,7 @@ a{color:var(--accent); text-decoration:none;}
   display:flex; align-items:center; justify-content:center; color:var(--accent); border:none; margin-top:2px;
 }
 .speak-btn svg{width:16px; height:16px;}
+.speak-spacer{flex:0 0 30px; width:30px; height:30px; margin-top:2px;}
 .speak-btn:active{background:var(--accent-soft);}
 .ex-question{font-size:20px; font-weight:700; line-height:1.35; margin-bottom:4px;}
 .option-row{
@@ -408,6 +409,7 @@ a{color:var(--accent); text-decoration:none;}
 .feedback-box.bad{background:var(--danger-soft); color:var(--danger);}
 .feedback-box .fb-text{color:var(--text); font-size:14px; line-height:1.5;}
 .feedback-box .fb-title{font-weight:700; margin-bottom:3px;}
+.feedback-box .speak-btn{margin-left:auto; margin-top:-4px;}
 
 body.keyboard-open .tabbar{ display:none; }
 
@@ -1273,7 +1275,7 @@ function renderStudyList(){
   if(units.length){
     html += '<button class="btn btn-primary" data-action="practice-global" style="margin-bottom:14px;">'+icon('dumbbell',18)+' Práctica global'+(cat!=='all'?' · '+categoryLabel(cat):'')+'</button>';
     const kinds = Array.from(new Set(units.map(u=>u.kind)));
-    html += '<div class="section-label" style="margin-top:2px;">Practicar por tipo de ejercicio</div><div class="chip-row">' + kinds.map(k=>'<button class="chip" data-practice-kind="'+k+'">'+typeLabel(k)+'</button>').join('') + '</div>';
+    html += '<div class="section-label" style="margin-top:2px;">Práctica global por tipo de ejercicio</div><div class="chip-row">' + kinds.map(k=>'<button class="chip" data-practice-kind="'+k+'">'+typeLabel(k)+'</button>').join('') + '</div>';
   }
   if(!topics.length){
     return html + '<div class="empty-state"><p>No hay temas en esta categoría.</p></div>';
@@ -1571,6 +1573,36 @@ function renderExamResult(){
 
 /* ======================= EXERCISE RUNNER (shared: practice + exam) ======================= */
 function speakText(s){ return String(s||'').replace(/_{2,}/g,' blank '); }
+// ---- Audio de la solución: solo existe tras comprobar y acertar, y lee la frase completa ya validada ----
+function canonicalAnswer(ex, val){
+  const list = ex.acceptedAnswers||[];
+  return list.find(a=>normalizeStr(a)===normalizeStr(val)) || list[0] || '';
+}
+function fillBlank(prompt, answer){
+  return /_{2,}/.test(prompt) ? prompt.replace(/_{2,}/, ()=>answer) : (prompt+' '+answer).trim();
+}
+// Frase completa que lee el botón. Devuelve '' si no hay nada que leer
+// (p. ej. una afirmación FALSA de verdadero/falso: no se lee como si fuera la solución).
+function solutionSentence(ex, val){
+  switch(ex.type){
+    case 'fill_blank': return fillBlank(ex.prompt, canonicalAnswer(ex, val));
+    case 'translation': return canonicalAnswer(ex, val);
+    case 'multiple_choice': return fillBlank(ex.prompt, ex.options[ex.correctIndex]);
+    case 'word_bank': return fillBlank(ex.prompt, ex.correctAnswer);
+    case 'matching': return ex.correctAnswer+': '+ex.prompt;
+    case 'reorder': return ex.correctOrder.join(' ');
+    case 'true_false': return ex.correctBool ? ex.prompt : '';
+  }
+  return '';
+}
+// Tableros (unir / banco de palabras): todas las soluciones, una detrás de otra.
+function boardSolutionText(u){
+  return u.items.map(ex=>solutionSentence(ex, null).trim()).filter(Boolean).map(t=>/[.!?:]$/.test(t)?t:t+'.').join(' ');
+}
+const SPEAK_SPACER = '<span class="speak-spacer" aria-hidden="true"></span>';
+function solutionSpeakBtnHtml(text){
+  return '<button type="button" class="speak-btn" data-speak="'+escapeHtml(speakText(text))+'" aria-label="Escuchar la solución completa" title="Escuchar la solución completa">'+icon('speaker',16)+'</button>';
+}
 function speakBtnHtml(text){ return '<button type="button" class="speak-btn" data-speak="'+escapeHtml(speakText(text))+'">'+icon('speaker',16)+'</button>'; }
 
 function renderExerciseRunner(mode){
@@ -1633,7 +1665,7 @@ function renderAssignCard(u, us, mode){
   if(checked){
     const ok = us.results.filter(Boolean).length, n = us.results.length;
     const all = ok===n;
-    html += '<div class="feedback-box '+(all?'ok':'bad')+'">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(n>1?ok+' de '+n+' correctas':(all?'¡Correcto!':'No es correcto'))+'</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div></div>';
+    html += '<div class="feedback-box '+(all?'ok':'bad')+'">'+icon(all?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(n>1?ok+' de '+n+' correctas':(all?'¡Correcto!':'No es correcto'))+'</div>'+(b.explanation?escapeHtml(b.explanation):'')+'</div>'+(all ? solutionSpeakBtnHtml(boardSolutionText(u)) : '')+'</div>';
   }
   html += '</div>';
   return html;
@@ -1648,7 +1680,7 @@ function renderListItemCard(u, us, i, mode){
   if(b.title){
     html += '<div class="row-between" style="align-items:flex-start; gap:8px; margin-bottom:6px;"><div class="ex-title">'+escapeHtml(b.title)+'</div>'+speakBtnHtml(b.title)+'</div>';
   }
-  html += renderSingleItem(u.kind, ex, us, i, checked);
+  html += renderSingleItem(u.kind, ex, us, i, checked, mode==='practice');
   if(checked){
     const ok = us.results[i];
     html += '<div class="feedback-box '+(ok?'ok':'bad')+'">'+icon(ok?'check':'close',20)+'<div class="fb-text"><div class="fb-title">'+(ok?'¡Correcto!':'No es correcto')+'</div></div></div>';
@@ -1670,7 +1702,7 @@ function renderUnitResultCard(u, us){
 }
 
 // Una sola pregunta (el número y el enunciado siempre en la misma línea).
-function renderSingleItem(kind, ex, us, i, checked){
+function renderSingleItem(kind, ex, us, i, checked, canSpeak){
   const num = '<span class="unit-num">'+(i+1)+'.</span> ';
   const val = us.answers[i];
   const answered = isAnswered(val);
@@ -1698,10 +1730,15 @@ function renderSingleItem(kind, ex, us, i, checked){
     }).join('');
   } else if(kind==='reorder'){
     body = num + (ex.prompt?escapeHtml(ex.prompt):'Ordena la frase:') + renderReorderItem(ex, us, i, checked);
-    const speakWrap = '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div></div>';
-    return speakWrap;
   }
-  return '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div>'+speakBtnHtml(ex.prompt)+'</div>';
+  // Audio: oculto hasta que se comprueba y se acierta; entonces lee la frase completa validada.
+  // Antes se reserva su hueco para que el enunciado no se mueva al aparecer. En el examen no hay audio.
+  let audio = '';
+  if(canSpeak){
+    const sentence = (checked && us.results[i]) ? solutionSentence(ex, us.answers[i]) : '';
+    audio = sentence ? solutionSpeakBtnHtml(sentence) : SPEAK_SPACER;
+  }
+  return '<div class="unit-head"><div class="unit-prompt ex-question">'+body+'</div>'+audio+'</div>';
 }
 function renderReorderItem(ex, us, i, checked){
   const bank = us.reorderBanks[i];
