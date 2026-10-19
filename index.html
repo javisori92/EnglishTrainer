@@ -437,6 +437,13 @@ body.keyboard-open .tabbar{ display:none; }
 .toast .t-icon{font-size:22px;}
 .toast .t-title{font-weight:700; font-size:14px;}
 .toast .t-sub{font-size:12px; color:var(--text-secondary);}
+#toast-host .toast.has-action{pointer-events:auto;}
+.toast .t-action{margin-left:6px; background:var(--accent-soft); color:var(--accent); border:none; border-radius:10px; padding:8px 14px; font-weight:700; font-size:14px; flex:0 0 auto;}
+.overlay.stacked{z-index:70;}
+.cloud-dot{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-secondary); margin-right:8px; flex:0 0 auto;}
+.cloud-dot.synced{background:var(--success);}
+.cloud-dot.init, .cloud-dot.syncing, .cloud-dot.pending{background:var(--accent);}
+.cloud-dot.offline, .cloud-dot.conflict, .cloud-dot.denied, .cloud-dot.error{background:var(--danger);}
 @keyframes toast-in{from{transform:translateY(-14px); opacity:0;} to{transform:translateY(0); opacity:1;}}
 
 /* Achievements */
@@ -505,6 +512,7 @@ body.keyboard-open .tabbar{ display:none; }
 
 /* ======================= ICONS ======================= */
 const ICONS = {
+  undo: '<path d="M9 7 4.5 11.5 9 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 11.5h9.5a5 5 0 0 1 0 10H11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -4)"/>',
   home: '<path d="M4 11.5 12 4l8 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   book: '<path d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H12v16h6.5a1.5 1.5 0 0 0 1.5-1.5v-13Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
   dumbbell: '<path d="M6.5 8.5v7M4 10v4M17.5 8.5v7M20 10v4M8 12h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -670,11 +678,277 @@ function loadData(){
 }
 let saveTimer=null;
 function save(){
+  cloudNoteChange();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); }catch(e){}
   }, 120);
 }
+
+/* ======================= COPIA AUTOMÁTICA DE SEGURIDAD ======================= */
+// Antes de operaciones destructivas (importar, restablecer, restaurar, resolver conflictos) se guarda la
+// versión anterior aquí. Un solo nivel; nunca se sobrescribe con unos datos vacíos.
+const SAFETY_KEY = STORAGE_KEY+'_safety';
+function isPristine(d){
+  return !d.topics.length && !d.blocks.length && !d.exercises.length && !d.vocabulary.length &&
+    !Object.keys(d.progress||{}).length && !(d.totalStats && d.totalStats.totalAnswered);
+}
+function saveSafetyBackup(reason, data){
+  const d = data || DATA;
+  if(isPristine(d)) return;
+  try{ localStorage.setItem(SAFETY_KEY, JSON.stringify({date:Date.now(), reason:reason, data:d})); }catch(e){}
+}
+function readSafetyBackup(){
+  try{ const b = JSON.parse(localStorage.getItem(SAFETY_KEY)||'null'); return (b && b.data) ? b : null; }catch(e){ return null; }
+}
+function summarizeData(d){
+  return {topics:d.topics.length, blocks:d.blocks.length, questions:d.exercises.length, words:d.vocabulary.length,
+          answered:(d.totalStats&&d.totalStats.totalAnswered)||0};
+}
+function summaryText(sm){
+  return sm.topics+' tema'+(sm.topics===1?'':'s')+' · '+sm.questions+' pregunta'+(sm.questions===1?'':'s')+' · '+sm.words+' palabra'+(sm.words===1?'':'s');
+}
+
+/* ======================= SINCRONIZACIÓN EN LA NUBE ======================= */
+// Los datos se guardan SIEMPRE en este dispositivo. Si la página tiene acceso a la nube de tu cuenta
+// (capacidades db + user), además se copian allí: sirven de respaldo y se comparten entre dispositivos.
+// Si la nube no está disponible, la app funciona exactamente igual que sin ella.
+const SYNC_KEY = STORAGE_KEY+'_sync';
+const CLOUD_CHUNK = 60000;            // caracteres por documento (el límite de la nube es 256 KiB por documento)
+function loadSyncMeta(){
+  let m = null;
+  try{ m = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){}
+  m = Object.assign({rev:null, dirty:false, device:'', lastSync:0, enabled:true}, (m && typeof m==='object') ? m : {});
+  if(!m.device) m.device = 'd'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+  return m;
+}
+let syncMeta = loadSyncMeta();           // rev = versión de la nube con la que estamos al día; dirty = hay cambios locales sin subir
+function persistSyncMeta(){ try{ localStorage.setItem(SYNC_KEY, JSON.stringify(syncMeta)); }catch(e){} }
+persistSyncMeta();
+let suppressDirty = false;
+const cloud = {state:'init', db:null, base:'', busy:false, again:false, timer:null, retry:null, retryMs:0, deferTimer:null, unsub:null, seq:0, err:''};
+
+function cloudNoteChange(){
+  if(suppressDirty) return;
+  cloud.seq++;
+  syncMeta.dirty = true; persistSyncMeta();
+  if(cloud.db && syncMeta.enabled){
+    cloudSetState('pending');
+    clearTimeout(cloud.timer); cloud.timer = setTimeout(()=>cloudSyncNow(), 2500);
+  }
+}
+function cloudStatusText(){
+  const rel = ()=>{
+    if(!syncMeta.lastSync) return '';
+    const m = Math.round((Date.now()-syncMeta.lastSync)/60000);
+    return m<1 ? ' · ahora mismo' : (m<60 ? ' · hace '+m+' min' : ' · hace '+Math.round(m/60)+' h');
+  };
+  switch(cloud.state){
+    case 'init': return 'Comprobando…';
+    case 'unavailable': return 'No disponible en este navegador';
+    case 'off': return 'Desactivada: los datos solo se guardan en este dispositivo';
+    case 'syncing': return 'Sincronizando…';
+    case 'pending': return 'Cambios pendientes de subir';
+    case 'synced': return 'Sincronizado'+rel();
+    case 'offline': return 'Sin conexión con la nube. Reintentando…';
+    case 'conflict': return 'Hay un conflicto por resolver';
+    case 'denied': return 'Sin permiso para usar la nube. Puedes volver a intentarlo.';
+    case 'error': return cloud.err || 'Error de sincronización';
+  }
+  return '';
+}
+function updateCloudStatusUI(){
+  const el = document.getElementById('cloud-status'); if(el) el.textContent = cloudStatusText();
+  const dot = document.getElementById('cloud-dot'); if(dot) dot.className = 'cloud-dot '+cloud.state;
+}
+function cloudSetState(st, err){
+  const prev = cloud.state;
+  cloud.state = st; cloud.err = err || '';
+  if(state.screen==='settings' && (prev==='init' || st==='init' || st==='unavailable' || st==='off' || prev==='off' || prev==='unavailable')) render();
+  else updateCloudStatusUI();
+}
+function cloudTeardown(){
+  if(cloud.unsub){ try{ cloud.unsub(); }catch(e){} cloud.unsub = null; }
+  clearTimeout(cloud.timer); clearTimeout(cloud.retry); clearTimeout(cloud.deferTimer);
+}
+function cloudDoc(name){ return cloud.db.doc(cloud.base+name); }
+async function cloudReadMeta(){
+  const snap = await cloudDoc('trainer_meta').get();
+  if(!snap.exists) return null;
+  const m = snap.data();
+  if(!m || typeof m.gen!=='string' || !Number.isInteger(m.chunks) || m.chunks<1 || typeof m.updatedAt!=='number') throw {code:'invalid_argument', message:'formato'};
+  return m;
+}
+async function cloudReadAll(meta){
+  const parts = await Promise.all(Array.from({length:meta.chunks}, (_,i)=>cloudDoc('trainer_'+meta.gen+'_'+i).get()));
+  let text = '';
+  for(const p of parts){
+    const d = p.exists ? p.data() : null;
+    if(!d || typeof d.text!=='string') throw {code:'unavailable', message:'incompleto'};      // otro dispositivo está escribiendo: se reintenta
+    text += d.text;
+  }
+  if(typeof meta.bytes==='number' && text.length!==meta.bytes) throw {code:'unavailable', message:'incoherente'};
+  let data;
+  try{ data = JSON.parse(text); }catch(e){ throw {code:'invalid_argument', message:'json'}; }
+  if(!data || typeof data!=='object' || Array.isArray(data)) throw {code:'invalid_argument', message:'json'};
+  return {meta:meta, data:data};
+}
+// Sube los datos como documentos nuevos (una "generación") y SOLO al final apunta el documento maestro a ellos,
+// así nadie puede leer una mezcla de versiones. Después borra la generación anterior.
+async function cloudWrite(prevMeta){
+  const seq = cloud.seq;
+  clearTimeout(saveTimer);                                       // lo que se sube debe estar ya guardado también en este dispositivo
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); }catch(e){}
+  const json = JSON.stringify(DATA);
+  const gen = Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  // Trozos de ~60.000 caracteres, sin cortar nunca un carácter "doble" (emoji) por la mitad: el servidor lo corrompería.
+  const parts = [];
+  for(let pos=0; pos<json.length; ){
+    let end = Math.min(pos+CLOUD_CHUNK, json.length);
+    if(end<json.length){ const c = json.charCodeAt(end-1); if(c>=0xD800 && c<=0xDBFF) end--; }
+    parts.push(json.slice(pos, end)); pos = end;
+  }
+  if(!parts.length) parts.push('');
+  const n = parts.length;
+  for(let i=0;i<n;i++) await cloudDoc('trainer_'+gen+'_'+i).set({gen:gen, i:i, text:parts[i]});
+  const updatedAt = Math.max(Date.now(), ((prevMeta && prevMeta.updatedAt) || 0)+1, (syncMeta.rev || 0)+1);
+  await cloudDoc('trainer_meta').set({v:1, gen:gen, chunks:n, bytes:json.length, updatedAt:updatedAt, device:syncMeta.device});
+  syncMeta.rev = updatedAt; syncMeta.lastSync = Date.now(); syncMeta.dirty = (cloud.seq!==seq); persistSyncMeta();
+  if(syncMeta.dirty) cloud.again = true;                       // hubo cambios mientras subía: otra vuelta
+  if(prevMeta && prevMeta.gen){
+    for(let i=0;i<(prevMeta.chunks||0);i++){ try{ await cloudDoc('trainer_'+prevMeta.gen+'_'+i).delete(); }catch(e){} }
+  }
+}
+function cloudBusyUI(){
+  return state.screen==='practice' || state.screen==='exam' || modalGuardBase!==null || !!document.getElementById('overlay') || !!document.getElementById('overlay-stacked');
+}
+function cloudApplyRemote(remote){
+  saveSafetyBackup('antes de traer los datos de la nube');
+  const keepTheme = DATA.settings && DATA.settings.theme;
+  suppressDirty = true;
+  try{
+    DATA = normalizeData(remote.data);
+    if(['auto','light','dark'].includes(keepTheme)) DATA.settings.theme = keepTheme;      // el tema visual es de cada dispositivo
+    clearTimeout(saveTimer);
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); }catch(e){}
+  } finally { suppressDirty = false; }
+  syncMeta.rev = remote.meta.updatedAt; syncMeta.dirty = false; syncMeta.lastSync = Date.now(); persistSyncMeta();
+  if(state.studyTopicId && !DATA.topics.some(t=>t.id===state.studyTopicId)) state.studyTopicId = null;
+  applyTheme(); render();
+  showToast('☁️','Datos actualizados desde la nube', summaryText(summarizeData(DATA)));
+}
+function cloudResolveConflict(remote){
+  return new Promise(resolve=>{
+    cloudSetState('conflict');
+    const rem = normalizeData(remote.data);
+    const lo = summarizeData(DATA), re = summarizeData(rem);
+    const when = new Date(remote.meta.updatedAt).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const box = 'background:var(--bg-secondary); border-radius:12px; padding:12px; margin-bottom:10px;';
+    const lbl = 'font-weight:700; text-transform:uppercase; letter-spacing:.03em;';
+    const body =
+      '<div class="body-text" style="margin-bottom:12px;">Los datos de este dispositivo y los de la nube son distintos. Elige cómo continuar: no se perderá nada sin que lo decidas.</div>'+
+      '<div style="'+box+'"><div class="footnote" style="'+lbl+'">Este dispositivo</div><div class="body-text">'+summaryText(lo)+' · '+lo.answered+' respuestas</div></div>'+
+      '<div style="'+box+'"><div class="footnote" style="'+lbl+'">Nube · modificada el '+escapeHtml(when)+'</div><div class="body-text">'+summaryText(re)+' · '+re.answered+' respuestas</div></div>'+
+      '<div class="footnote" style="line-height:1.5;"><strong>Combinar</strong> junta lo de ambos sin borrar nada (puede reaparecer algo que hubieras eliminado en uno de los dos). La versión que no elijas se guarda como copia automática en Ajustes.</div>';
+    const footer = '<div style="display:flex; flex-direction:column; gap:10px;">'+
+      '<button type="button" class="btn btn-primary" id="cf-merge">Combinar ambos</button>'+
+      '<button type="button" class="btn btn-secondary" id="cf-cloud">Usar los de la nube</button>'+
+      '<button type="button" class="btn btn-secondary" id="cf-local">Usar los de este dispositivo</button></div>';
+    openModal('<div class="sheet-handle"></div><div class="sheet-header"><div class="title3">Conflicto de sincronización</div></div>', body, footer, {persistent:true});
+    const run = fn=>{ closeModal(); Promise.resolve().then(fn).then(()=>resolve(), e=>{ cloudFail(e); resolve(); }); };
+    document.getElementById('cf-merge').onclick = ()=>run(async()=>{
+      saveSafetyBackup('antes de combinar con la nube');
+      const copy = JSON.parse(JSON.stringify(DATA));
+      mergeIncoming(copy, rem);
+      DATA = copy; save();
+      syncMeta.rev = remote.meta.updatedAt; syncMeta.dirty = true; persistSyncMeta();
+      render();
+      await cloudWrite(remote.meta);
+      cloudSetState('synced');
+      showToast('☁️','Datos combinados', summaryText(summarizeData(DATA)));
+    });
+    document.getElementById('cf-cloud').onclick = ()=>run(async()=>{ cloudApplyRemote(remote); cloudSetState('synced'); });
+    document.getElementById('cf-local').onclick = ()=>run(async()=>{
+      saveSafetyBackup('versión de la nube sustituida', rem);
+      syncMeta.rev = remote.meta.updatedAt; syncMeta.dirty = true; persistSyncMeta();
+      await cloudWrite(remote.meta);
+      cloudSetState('synced');
+      showToast('☁️','Nube actualizada con los datos de este dispositivo','');
+    });
+  });
+}
+function cloudFail(e){
+  const code = (e && e.code) ? e.code : 'unavailable';
+  if(['not_granted','capability_disabled','capability_removed','revoked'].includes(code)){ cloudTeardown(); cloud.db = null; cloudSetState('denied'); return; }
+  if(code==='quota_exceeded'){ cloudSetState('error','La nube está llena: no se pueden guardar más datos.'); return; }
+  if(code==='invalid_argument'){ cloudSetState('error','No se pudieron guardar los datos en la nube.'); return; }
+  cloudSetState('offline');
+  cloud.retryMs = Math.min(cloud.retryMs ? cloud.retryMs*2 : 20000, 300000);
+  clearTimeout(cloud.retry); cloud.retry = setTimeout(()=>cloudSyncNow(), cloud.retryMs);
+}
+// Reconciliación: decide si subir, bajar o preguntar.
+async function cloudSyncNow(){
+  if(!cloud.db || !syncMeta.enabled) return;
+  if(cloud.busy){ cloud.again = true; return; }
+  cloud.busy = true; clearTimeout(cloud.timer); clearTimeout(cloud.deferTimer); clearTimeout(cloud.retry);
+  cloudSetState('syncing');
+  try{
+    const remoteMeta = await cloudReadMeta();
+    const localHas = !isPristine(DATA);
+    const changed = syncMeta.dirty || (syncMeta.rev===null && localHas);          // hay algo local que la nube no tiene
+    if(!remoteMeta){
+      if(localHas) await cloudWrite(null); else { syncMeta.dirty = false; persistSyncMeta(); }
+    } else if(syncMeta.rev===remoteMeta.updatedAt){
+      if(syncMeta.dirty) await cloudWrite(remoteMeta);                              // solo cambió este dispositivo
+    } else {
+      // la nube ha cambiado desde la última vez (o es la primera vez en este dispositivo)
+      if(cloudBusyUI()){ cloud.deferTimer = setTimeout(cloudSyncNow, 5000); cloudSetState('pending'); return; }   // nunca a mitad de una sesión
+      const remote = await cloudReadAll(remoteMeta);
+      if(!localHas || !changed) cloudApplyRemote(remote); else await cloudResolveConflict(remote);
+    }
+    cloud.retryMs = 0;
+    if(cloud.state==='syncing') cloudSetState(syncMeta.dirty ? 'pending' : 'synced');
+  }catch(e){ cloudFail(e); }
+  finally{ cloud.busy = false; if(cloud.again){ cloud.again = false; setTimeout(cloudSyncNow, 0); } }
+}
+function cloudSubscribe(){
+  if(cloud.unsub || !cloud.db) return;
+  try{
+    cloud.unsub = cloudDoc('trainer_meta').onSnapshot(snap=>{
+      if(!snap.exists || snap.hasPendingWrites) return;
+      const m = snap.data();
+      if(!m || m.device===syncMeta.device) return;
+      if(m.updatedAt!==syncMeta.rev) cloudSyncNow();
+    }, ()=>{ cloud.unsub = null; });
+  }catch(e){ cloud.unsub = null; }
+}
+async function cloudInit(){
+  cloudTeardown(); cloud.db = null;
+  if(!syncMeta.enabled){ cloudSetState('off'); return; }
+  cloudSetState('init');
+  let db, uid;
+  try{
+    if(!(window.claude && typeof window.claude.use==='function')){ cloudSetState('unavailable'); return; }
+    const user = await window.claude.use('user');
+    db = await window.claude.use('db');
+    if(!db || !user){ cloudSetState('unavailable'); return; }
+    uid = await user.id();
+    if(!uid){ cloudSetState('unavailable'); return; }
+    db.doc('data/users/'+uid+'/trainer_meta');                  // valida el id como tramo de ruta
+  }catch(e){ cloudSetState('unavailable'); return; }
+  cloud.db = db; cloud.base = 'data/users/'+uid+'/';
+  await cloudSyncNow();
+  cloudSubscribe();
+}
+function cloudEnable(){ syncMeta.enabled = true; persistSyncMeta(); cloudInit(); }
+function cloudDisable(){ syncMeta.enabled = false; persistSyncMeta(); cloudTeardown(); cloud.db = null; cloudSetState('off'); }
+function cloudActive(){ return !!(cloud.db && syncMeta.enabled); }
+document.addEventListener('visibilitychange', ()=>{
+  if(!cloudActive()) return;
+  if(document.visibilityState==='visible') cloudSyncNow();
+  else if(syncMeta.dirty){ clearTimeout(cloud.timer); cloudSyncNow(); }       // al salir de la app, subir lo pendiente ya
+});
+window.addEventListener('online', ()=>{ if(cloudActive()) cloudSyncNow(); });
 
 /* ======================= HELPERS ======================= */
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -837,13 +1111,24 @@ function showAchievementToast(a){
 }
 
 /* ======================= TOASTS ======================= */
-function showToast(iconChar, title, sub){
+function showToast(iconChar, title, sub, opts){
+  opts = opts || {};
   const host = document.getElementById('toast-host');
   const el = document.createElement('div');
-  el.className='toast';
-  el.innerHTML = '<div class="t-icon">'+iconChar+'</div><div><div class="t-title">'+escapeHtml(title)+'</div>'+(sub?'<div class="t-sub">'+escapeHtml(sub)+'</div>':'')+'</div>';
+  el.className='toast'+(opts.actionLabel?' has-action':'');
+  el.innerHTML = '<div class="t-icon">'+iconChar+'</div><div><div class="t-title">'+escapeHtml(title)+'</div>'+(sub?'<div class="t-sub">'+escapeHtml(sub)+'</div>':'')+'</div>'+
+    (opts.actionLabel?'<button type="button" class="t-action">'+escapeHtml(opts.actionLabel)+'</button>':'');
   host.appendChild(el);
-  setTimeout(()=>{ el.style.transition='opacity .3s, transform .3s'; el.style.opacity='0'; el.style.transform='translateY(-10px)'; setTimeout(()=>el.remove(), 320); }, 3200);
+  let gone = false;
+  const dismiss = ()=>{ if(gone) return; gone = true; el.style.transition='opacity .3s, transform .3s'; el.style.opacity='0'; el.style.transform='translateY(-10px)'; setTimeout(()=>el.remove(), 320); };
+  if(opts.actionLabel){
+    el.querySelector('.t-action').onclick = ()=>{ if(gone) return; dismiss(); if(opts.onAction) opts.onAction(); };
+  }
+  setTimeout(dismiss, opts.duration || 3200);
+}
+// Aviso con botón "Deshacer" (8 s) para operaciones que borran o reemplazan datos.
+function offerUndo(title, sub, restoreFn){
+  showToast('↩️', title, sub, {actionLabel:'Deshacer', duration:8000, onAction:()=>{ restoreFn(); save(); render(); showToast('✅','Restaurado',''); }});
 }
 
 /* ======================= SOUND ======================= */
@@ -1985,38 +2270,110 @@ function renderSettings(){
   html += '<div class="row-between"><span class="body-text">Sonido de feedback</span><label class="switch"><input type="checkbox" id="sound-toggle" '+(DATA.settings.soundEnabled?'checked':'')+'><span class="switch-track"></span></label></div>';
   html += '</div>';
 
+  html += '<div class="section-label">Sincronización</div><div class="card">';
+  if(cloud.state==='unavailable'){
+    html += '<div class="body-text" style="margin-bottom:4px;">No disponible aquí</div><div class="footnote" style="line-height:1.5;">La copia en la nube necesita abrir la app desde tu cuenta de claude.ai. Mientras tanto tus datos se guardan solo en este dispositivo.</div>';
+  } else {
+    html += '<div class="row-between"><span class="body-text">Guardar en la nube</span><label class="switch"><input type="checkbox" id="cloud-toggle" '+(syncMeta.enabled?'checked':'')+'><span class="switch-track"></span></label></div>';
+    html += '<div style="display:flex; align-items:center; margin-top:10px;"><span id="cloud-dot" class="cloud-dot '+cloud.state+'"></span><span id="cloud-status" class="footnote">'+escapeHtml(cloudStatusText())+'</span></div>';
+    html += '<div class="footnote" style="line-height:1.5; margin-top:8px;">Tus datos se guardan en tu cuenta y se comparten entre tus dispositivos. También se mantienen en este dispositivo.</div>';
+    if(syncMeta.enabled) html += '<button class="btn btn-secondary" data-action="cloud-sync-now" style="margin-top:12px; margin-bottom:0;">'+(cloud.state==='denied'?'Reintentar':'Sincronizar ahora')+'</button>';
+  }
+  html += '</div>';
+
   html += '<div class="section-label">Copia de seguridad</div><div class="card">';
   html += '<button class="btn btn-secondary" data-action="export-data" style="margin-bottom:10px;">'+icon('download',18)+' Exportar datos</button>';
   html += '<label class="btn btn-secondary" style="margin-bottom:0; display:flex;">'+icon('upload',18)+' Importar datos<input type="file" accept="application/json" id="import-file" style="display:none;"></label>';
+  const safety = readSafetyBackup();
+  if(safety){
+    const when = new Date(safety.date).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    html += '<div class="footnote" style="margin:14px 2px 8px; line-height:1.4;">Copia automática del '+escapeHtml(when)+' ('+escapeHtml(safety.reason)+'): '+escapeHtml(summaryText(summarizeData(normalizeData(safety.data))))+'.</div>';
+    html += '<button class="btn btn-secondary" data-action="restore-safety" style="margin-bottom:0;">'+icon('undo',18)+' Recuperar copia automática</button>';
+  }
   html += '</div>';
 
   html += '<div class="section-label">Zona de peligro</div><div class="card">';
   html += '<button class="btn btn-danger" data-action="reset-all">'+icon('trash',18)+' Restablecer todos los datos</button>';
   html += '</div>';
 
-  html += '<div class="footnote" style="text-align:center; padding:14px 0;">English Trainer · datos guardados en este dispositivo</div>';
+  html += '<div class="footnote" style="text-align:center; padding:14px 0;">English Trainer · datos guardados en este dispositivo'+(cloud.state==='synced'?' y en tu cuenta':'')+'</div>';
   return html;
 }
 
 /* ======================= MODALS ======================= */
-function openModal(headerHtml, bodyHtml, footerHtml){
+function openModal(headerHtml, bodyHtml, footerHtml, opts){
   const host = document.getElementById('modal-host');
   host.innerHTML = '<div class="overlay" id="overlay"><div class="sheet">' +
     (headerHtml ? '<div class="sheet-top">'+headerHtml+'</div>' : '') +
     '<div class="sheet-scroll">'+bodyHtml+'</div>' +
     (footerHtml ? '<div class="sheet-footer">'+footerHtml+'</div>' : '') +
     '</div></div>';
-  document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
-  document.querySelectorAll('[data-action="close-modal"]').forEach(b=>{ b.onclick=closeModal; });
+  modalPersistent = !!(opts && opts.persistent);
+  document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') requestCloseModal(); });
+  document.querySelectorAll('[data-action="close-modal"]').forEach(b=>{ b.onclick=requestCloseModal; });
   wireModalActions();
   lockBodyScroll();
+  // Solo los formularios (los que tienen botón "save-...") vigilan los cambios sin guardar.
+  modalGuardBase = document.querySelector('#modal-host [data-action^="save-"]') ? captureModalState() : null;
 }
 function closeModal(){
   document.getElementById('modal-host').innerHTML='';
+  modalGuardBase = null; modalPersistent = false;
   if(modalOnDismiss){ const cb=modalOnDismiss; modalOnDismiss=null; cb(); }
   unlockBodyScroll();
 }
 let modalOnDismiss = null;
+let modalGuardBase = null;      // estado del formulario al abrirlo (null = el modal no es un formulario)
+let modalPersistent = false;    // true = no se cierra tocando fuera ni con Esc (p. ej. al resolver un conflicto)
+// Foto del contenido editable del modal, para detectar si hay cambios sin guardar.
+function captureModalState(){
+  const sheet = document.querySelector('#modal-host .sheet');
+  if(!sheet) return '';
+  const parts = [];
+  sheet.querySelectorAll('input, textarea, select').forEach(el=>{
+    if(el.type==='file') return;
+    parts.push((el.id||el.name||'')+'='+((el.type==='checkbox'||el.type==='radio') ? (el.checked?'1':'0') : el.value));
+  });
+  sheet.querySelectorAll('.segmented').forEach(sg=>{
+    const a = sg.querySelector('.active');
+    parts.push('seg:'+(sg.id||'')+'='+(a?a.textContent.trim():''));
+  });
+  return parts.join('\u0001');
+}
+// Cierre "pedido por el usuario" (tocar fuera, ✕ o Esc): si hay cambios sin guardar, pregunta antes.
+function requestCloseModal(){
+  if(modalPersistent) return;
+  if(document.getElementById('overlay-stacked')) return;
+  if(modalGuardBase!==null && captureModalState()!==modalGuardBase){
+    showStackedConfirm('Tienes cambios sin guardar. Si sales ahora se perderán.', 'Descartar cambios', 'Seguir editando', true).then(ok=>{ if(ok) closeModal(); });
+    return;
+  }
+  closeModal();
+}
+// Confirmación que se dibuja ENCIMA del modal actual sin destruirlo (showConfirm sustituye el modal).
+function showStackedConfirm(message, okLabel, cancelLabel, danger){
+  return new Promise(resolve=>{
+    const layer = document.createElement('div');
+    layer.className = 'overlay stacked'; layer.id = 'overlay-stacked';
+    layer.innerHTML = '<div class="sheet"><div class="sheet-top"><div class="sheet-handle"></div></div>' +
+      '<div class="sheet-scroll"><div class="body-text" style="text-align:center; padding:4px;">'+escapeHtml(message)+'</div></div>' +
+      '<div class="sheet-footer"><div class="btn-block-row">' +
+        '<button type="button" class="btn btn-secondary" id="stk-cancel" style="flex:1;">'+escapeHtml(cancelLabel||'Cancelar')+'</button>' +
+        '<button type="button" class="btn '+(danger?'btn-danger':'btn-primary')+'" id="stk-ok" style="flex:1;">'+escapeHtml(okLabel||'Confirmar')+'</button>' +
+      '</div></div></div>';
+    document.body.appendChild(layer);
+    const done = v=>{ layer.remove(); resolve(v); };
+    layer.querySelector('#stk-cancel').onclick = ()=>done(false);
+    layer.querySelector('#stk-ok').onclick = ()=>done(true);
+    layer.addEventListener('click', e=>{ if(e.target===layer) done(false); });
+  });
+}
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  const stk = document.getElementById('overlay-stacked');
+  if(stk){ const c = stk.querySelector('#stk-cancel'); if(c) c.click(); return; }
+  if(document.getElementById('overlay')) requestCloseModal();
+});
 
 // Bloqueo de scroll del fondo (para el overlay de los modales/diales y mientras el teclado
 // está abierto). Usa un contador para que ambos motivos puedan solaparse sin desincronizarse.
@@ -2303,7 +2660,7 @@ function afterRender(){
   // content CRUD
   const addTopicBtn = document.querySelector('[data-action="add-topic"]'); if(addTopicBtn) addTopicBtn.onclick=()=>openTopicModal(null);
   document.querySelectorAll('[data-edit-topic]').forEach(b=>{ b.onclick=()=>openTopicModal(b.getAttribute('data-edit-topic')); });
-  document.querySelectorAll('[data-del-topic]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-topic'); showConfirm('¿Eliminar este tema y todos sus ejercicios y vocabulario asociados?','Eliminar',true).then(ok=>{ if(ok) deleteTopic(id); }); }; });
+  document.querySelectorAll('[data-del-topic]').forEach(b=>{ b.onclick=()=>{ const id=b.getAttribute('data-del-topic'); showConfirm('¿Eliminar este tema y todos sus ejercicios?','Eliminar',true).then(ok=>{ if(ok) deleteTopic(id); }); }; });
 
   const addBlkBtn = document.querySelector('[data-action="add-block"]'); if(addBlkBtn) addBlkBtn.onclick=()=>openBlockModal(null);
   document.querySelectorAll('[data-edit-block]').forEach(b=>{ b.onclick=()=>openBlockModal(b.getAttribute('data-edit-block')); });
@@ -2323,13 +2680,19 @@ function afterRender(){
   const dailyGoalInput = document.getElementById('daily-goal-input'); if(dailyGoalInput) dailyGoalInput.onchange=()=>{ DATA.settings.dailyGoal=Math.max(1,Number(dailyGoalInput.value)||15); save(); };
   const soundToggle = document.getElementById('sound-toggle'); if(soundToggle) soundToggle.onchange=()=>{ DATA.settings.soundEnabled=soundToggle.checked; save(); };
   const exportBtn = document.querySelector('[data-action="export-data"]'); if(exportBtn) exportBtn.onclick=exportData;
-  const importFile = document.getElementById('import-file'); if(importFile) importFile.onchange=(e)=>importData(e.target.files[0]);
+  const importFile = document.getElementById('import-file'); if(importFile) importFile.onchange=(e)=>{ const f = e.target.files[0]; e.target.value = ''; importData(f); };
+  const restoreBtn = document.querySelector('[data-action="restore-safety"]'); if(restoreBtn) restoreBtn.onclick = restoreSafetyBackup;
+  const cloudToggle = document.getElementById('cloud-toggle'); if(cloudToggle) cloudToggle.onchange = ()=>{ if(cloudToggle.checked) cloudEnable(); else cloudDisable(); };
+  const cloudNow = document.querySelector('[data-action="cloud-sync-now"]'); if(cloudNow) cloudNow.onclick = ()=>{ if(cloud.db) cloudSyncNow(); else cloudInit(); };
   const resetBtn = document.querySelector('[data-action="reset-all"]'); if(resetBtn) resetBtn.onclick=()=>{
-    showConfirm('Esto borrará todos tus temas, ejercicios, vocabulario y progreso.', 'Continuar', true).then(ok=>{
+    showConfirm('Esto borrará todos tus temas, ejercicios, vocabulario y progreso'+(cloudActive()?', también de la nube':'')+'.', 'Continuar', true).then(ok=>{
       if(!ok) return;
-      showConfirm('Esta acción no se puede deshacer. ¿Seguro?', 'Sí, borrar todo', true).then(ok2=>{
+      showConfirm('¿Seguro? Podrás deshacerlo durante unos segundos, o recuperar la copia automática desde Ajustes.', 'Sí, borrar todo', true).then(ok2=>{
         if(!ok2) return;
-        DATA = defaultData(); save(); render(); showToast('🗑️','Datos restablecidos','');
+        const before = JSON.stringify(DATA);
+        saveSafetyBackup('antes de restablecer');
+        DATA = defaultData(); save(); render();
+        offerUndo('Datos restablecidos', '', ()=>{ DATA = normalizeData(JSON.parse(before)); });
       });
     });
   };
@@ -2451,22 +2814,67 @@ function wireModalActions(){
   };
 }
 
+// Reinserta registros guardados en la posición que tenían (sin duplicar los que ya existan).
+function reinsert(list, entries){
+  entries.slice().sort((a,b)=>a.i-b.i).forEach(en=>{
+    if(!list.some(x=>x.id===en.r.id)) list.splice(Math.min(en.i, list.length), 0, en.r);
+  });
+}
 function deleteTopic(id){
+  const snap = {
+    topic: DATA.topics.map((r,i)=>({r,i})).filter(x=>x.r.id===id),
+    blocks: DATA.blocks.map((r,i)=>({r,i})).filter(x=>x.r.topicId===id),
+    exercises: DATA.exercises.map((r,i)=>({r,i})).filter(x=>x.r.topicId===id),
+    achievements: DATA.achievements.filter(a=>a.type==='topic_mastery' && a.topicId===id).map(a=>({id:a.id, type:a.type, topicId:a.topicId})),
+    progress: {}
+  };
+  snap.exercises.forEach(x=>{ if(DATA.progress[x.r.id]) snap.progress[x.r.id] = DATA.progress[x.r.id]; });
+  const name = snap.topic.length ? snap.topic[0].r.name : 'Tema';
   DATA.exercises.filter(e=>e.topicId===id).forEach(e=>{ delete DATA.progress[e.id]; });
   DATA.exercises = DATA.exercises.filter(e=>e.topicId!==id);
   DATA.blocks = DATA.blocks.filter(b=>b.topicId!==id);
   DATA.achievements.forEach(a=>{ if(a.type==='topic_mastery' && a.topicId===id){ a.type='total_correct'; a.topicId=undefined; } });
   DATA.topics = DATA.topics.filter(t=>t.id!==id);
   save(); render();
+  offerUndo('Tema eliminado', name, ()=>{
+    reinsert(DATA.topics, snap.topic); reinsert(DATA.blocks, snap.blocks); reinsert(DATA.exercises, snap.exercises);
+    Object.keys(snap.progress).forEach(k=>{ DATA.progress[k] = snap.progress[k]; });
+    snap.achievements.forEach(sa=>{ const a = DATA.achievements.find(x=>x.id===sa.id); if(a){ a.type = sa.type; a.topicId = sa.topicId; } });
+  });
 }
 function deleteBlock(id){
+  const snap = {
+    blocks: DATA.blocks.map((r,i)=>({r,i})).filter(x=>x.r.id===id),
+    exercises: DATA.exercises.map((r,i)=>({r,i})).filter(x=>x.r.blockId===id),
+    progress: {}
+  };
+  snap.exercises.forEach(x=>{ if(DATA.progress[x.r.id]) snap.progress[x.r.id] = DATA.progress[x.r.id]; });
+  const title = snap.blocks.length ? blockTitle(snap.blocks[0].r) : 'Ejercicio';
   itemsOfBlock({id:id}).forEach(e=>{ delete DATA.progress[e.id]; });
   DATA.exercises = DATA.exercises.filter(e=>e.blockId!==id);
   DATA.blocks = DATA.blocks.filter(b=>b.id!==id);
   save(); render();
+  offerUndo('Ejercicio eliminado', title, ()=>{
+    reinsert(DATA.blocks, snap.blocks); reinsert(DATA.exercises, snap.exercises);
+    Object.keys(snap.progress).forEach(k=>{ DATA.progress[k] = snap.progress[k]; });
+  });
 }
-function deleteVocab(id){ DATA.vocabulary = DATA.vocabulary.filter(v=>v.id!==id); save(); render(); }
-function deleteAchievement(id){ DATA.achievements = DATA.achievements.filter(a=>a.id!==id); DATA.unlockedAchievementIds = DATA.unlockedAchievementIds.filter(x=>x!==id); save(); render(); }
+function deleteVocab(id){
+  const snap = { words: DATA.vocabulary.map((r,i)=>({r,i})).filter(x=>x.r.id===id), progress: DATA.progress[id] };
+  const term = snap.words.length ? snap.words[0].r.term : 'Palabra';
+  DATA.vocabulary = DATA.vocabulary.filter(v=>v.id!==id);
+  delete DATA.progress[id];
+  save(); render();
+  offerUndo('Palabra eliminada', term, ()=>{ reinsert(DATA.vocabulary, snap.words); if(snap.progress) DATA.progress[id] = snap.progress; });
+}
+function deleteAchievement(id){
+  const snap = { list: DATA.achievements.map((r,i)=>({r,i})).filter(x=>x.r.id===id), unlocked: DATA.unlockedAchievementIds.includes(id) };
+  const name = snap.list.length ? snap.list[0].r.name : 'Logro';
+  DATA.achievements = DATA.achievements.filter(a=>a.id!==id);
+  DATA.unlockedAchievementIds = DATA.unlockedAchievementIds.filter(x=>x!==id);
+  save(); render();
+  offerUndo('Logro eliminado', name, ()=>{ reinsert(DATA.achievements, snap.list); if(snap.unlocked && !DATA.unlockedAchievementIds.includes(id)) DATA.unlockedAchievementIds.push(id); });
+}
 
 /* ======================= PRACTICE / EXAM FLOW ======================= */
 function startPractice(filter){
@@ -2769,9 +3177,11 @@ async function exportData(){
   if(downloadsCap){
     try{
       await downloadsCap.save({filename, data: json});
-      showToast('⬇️','Descarga iniciada','');
+      showToast('⬇️','Copia de seguridad guardada', filename);
       return;
-    }catch(e){}
+    }catch(e){
+      if(e && e.code==='declined') return;        // el usuario ha dicho que no: no se insiste ni se abre nada más
+    }
   }
   openModal(
     modalHeader('Copia de seguridad'),
@@ -2782,17 +3192,127 @@ function importData(file){
   if(!file) return;
   const reader = new FileReader();
   reader.onload = ()=>{
+    let incoming;
     try{
       const parsed = JSON.parse(reader.result);
-      showConfirm('Esto reemplazará tus datos actuales por los del archivo importado.', 'Reemplazar', true).then(ok=>{
-        if(!ok) return;
-        DATA = normalizeData(parsed);
-        save(); render();
-        showToast('✅','Datos importados','');
-      });
-    }catch(e){ showToast('⚠️','Archivo no válido',''); }
+      const ok = parsed && typeof parsed==='object' && !Array.isArray(parsed) && ['topics','blocks','exercises','vocabulary'].some(k=>Array.isArray(parsed[k]));
+      if(!ok) throw new Error('formato');
+      incoming = normalizeData(parsed);
+    }catch(e){ showToast('⚠️','Archivo no válido',''); return; }
+    if(isPristine(DATA)){            // app vacía: añadir y reemplazar son lo mismo, se adopta el archivo entero
+      DATA = incoming; save(); render();
+      showToast('✅','Datos importados', summaryText(summarizeData(DATA)));
+      return;
+    }
+    openImportSheet(file.name, incoming);
   };
   reader.readAsText(file);
+}
+function openImportSheet(name, inc){
+  const sm = summarizeData(inc), cur = summarizeData(DATA);
+  const own = inc.achievements.filter(a=>a.custom).length;
+  const box = 'background:var(--bg-secondary); border-radius:12px; padding:12px; margin-bottom:10px;';
+  const body =
+    '<div class="body-text" style="margin-bottom:10px;">Archivo: <strong>'+escapeHtml(name)+'</strong></div>'+
+    '<div style="'+box+'"><div class="footnote" style="font-weight:700; text-transform:uppercase; letter-spacing:.03em;">El archivo contiene</div><div class="body-text">'+summaryText(sm)+(own?' · '+own+' logro'+(own===1?'':'s')+' propio'+(own===1?'':'s'):'')+'</div></div>'+
+    '<div style="'+box+'"><div class="footnote" style="font-weight:700; text-transform:uppercase; letter-spacing:.03em;">Ahora tienes</div><div class="body-text">'+summaryText(cur)+'</div></div>'+
+    '<div class="footnote" style="line-height:1.5;"><strong>Añadir</strong> suma lo nuevo y conserva todo lo que ya tienes (lo que ya existe no se duplica). <strong>Reemplazar</strong> borra tus datos actuales y deja solo los del archivo.</div>';
+  const footer = '<div style="display:flex; flex-direction:column; gap:10px;">'+
+    '<button type="button" class="btn btn-primary" id="imp-merge">Añadir a mi contenido</button>'+
+    '<button type="button" class="btn btn-danger" id="imp-replace">Reemplazar todo</button>'+
+    '<button type="button" class="btn btn-secondary" id="imp-cancel">Cancelar</button></div>';
+  openModal(modalHeader('Importar datos'), body, footer);
+  document.getElementById('imp-cancel').onclick = closeModal;
+  document.getElementById('imp-merge').onclick = ()=>{
+    closeModal();
+    const copy = JSON.parse(JSON.stringify(DATA));
+    const rep = mergeIncoming(copy, inc);
+    const added = rep.topics+rep.blocks+rep.exercises+rep.words+rep.achievements;
+    if(!added){ showToast('ℹ️','Sin novedades','Todo lo del archivo ya estaba en tu app'); return; }
+    const before = JSON.stringify(DATA);
+    saveSafetyBackup('antes de importar');
+    DATA = copy; save(); render();
+    const parts = [];
+    if(rep.topics) parts.push(rep.topics+' tema'+(rep.topics===1?'':'s'));
+    if(rep.exercises) parts.push(rep.exercises+' pregunta'+(rep.exercises===1?'':'s'));
+    if(rep.words) parts.push(rep.words+' palabra'+(rep.words===1?'':'s'));
+    if(rep.achievements) parts.push(rep.achievements+' logro'+(rep.achievements===1?'':'s'));
+    const skipped = rep.skippedBlocks+rep.skippedWords;
+    offerUndo('Contenido añadido', parts.join(' · ')+(skipped?' (ya existían: '+skipped+')':''), ()=>{ DATA = normalizeData(JSON.parse(before)); });
+  };
+  document.getElementById('imp-replace').onclick = ()=>{
+    closeModal();
+    showConfirm('Esto reemplazará tus datos actuales por los del archivo.', 'Reemplazar', true).then(ok=>{
+      if(!ok) return;
+      const before = JSON.stringify(DATA);
+      saveSafetyBackup('antes de importar');
+      DATA = inc; save(); render();
+      offerUndo('Datos importados', summaryText(summarizeData(DATA)), ()=>{ DATA = normalizeData(JSON.parse(before)); });
+    });
+  };
+}
+// Suma el contenido de `inc` a `d` sin tocar lo que ya existe. Devuelve cuánto se añadió y cuánto se omitió.
+function mergeIncoming(d, inc){
+  const rep = {topics:0, blocks:0, exercises:0, words:0, achievements:0, skippedBlocks:0, skippedWords:0, renamed:0};
+  const topicIds = new Set(d.topics.map(t=>t.id)), blockIds = new Set(d.blocks.map(b=>b.id)), exIds = new Set(d.exercises.map(e=>e.id));
+  const vocIds = new Set(d.vocabulary.map(v=>v.id)), achIds = new Set(d.achievements.map(a=>a.id));
+  const topicMap = {};                                                   // id del archivo -> id aquí
+  inc.topics.forEach(t=>{
+    if(topicIds.has(t.id)){ topicMap[t.id] = t.id; return; }             // mismo tema: se conserva el tuyo
+    const cat = t.category||'grammar';
+    const clash = d.topics.some(x=>(x.name||'').trim().toLowerCase()===(t.name||'').trim().toLowerCase() && (x.category||'grammar')===cat);
+    const copy = Object.assign({}, t);
+    if(clash){
+      const used = new Set(d.topics.map(x=>x.name.trim().toLowerCase()));
+      let cand = t.name+' (importado)', n = 2;
+      while(used.has(cand.toLowerCase())){ cand = t.name+' (importado '+n+')'; n++; }
+      copy.name = cand; rep.renamed++;
+    }
+    d.topics.push(copy); topicIds.add(copy.id); topicMap[t.id] = copy.id; rep.topics++;
+  });
+  const addedBlock = {};                                                 // id de bloque añadido -> id de su tema
+  inc.blocks.forEach(b=>{
+    if(blockIds.has(b.id)){ rep.skippedBlocks++; return; }               // el bloque ya existe: no se duplica ni se mezcla
+    const tid = topicMap[b.topicId] || (topicIds.has(b.topicId) ? b.topicId : null);
+    if(!tid) return;
+    d.blocks.push(Object.assign({}, b, {topicId:tid})); blockIds.add(b.id); addedBlock[b.id] = tid; rep.blocks++;
+  });
+  inc.exercises.forEach(e=>{
+    if(!addedBlock[e.blockId] || exIds.has(e.id)) return;
+    d.exercises.push(Object.assign({}, e, {topicId:addedBlock[e.blockId]})); exIds.add(e.id); rep.exercises++;
+    if(inc.progress && inc.progress[e.id]) d.progress[e.id] = Object.assign({}, inc.progress[e.id]);
+  });
+  const terms = new Set(d.vocabulary.map(v=>(v.term||'').trim().toLowerCase()));
+  inc.vocabulary.forEach(v=>{
+    const k = (v.term||'').trim().toLowerCase();
+    if(vocIds.has(v.id) || terms.has(k)){ rep.skippedWords++; return; }  // misma palabra: no se duplica
+    d.vocabulary.push(Object.assign({}, v)); vocIds.add(v.id); terms.add(k); rep.words++;
+    if(inc.progress && inc.progress[v.id]) d.progress[v.id] = Object.assign({}, inc.progress[v.id]);
+  });
+  inc.achievements.forEach(a=>{
+    if(achIds.has(a.id)) return;
+    const copy = Object.assign({}, a);
+    if(a.type==='topic_mastery'){
+      const tid = topicMap[a.topicId] || (topicIds.has(a.topicId) ? a.topicId : null);
+      if(!tid) return;                                                    // su tema no está: el logro no tendría sentido
+      copy.topicId = tid;
+    }
+    d.achievements.push(copy); achIds.add(copy.id); rep.achievements++;
+  });
+  return rep;
+}
+// Recupera la copia automática (la versión anterior a la última importación/restablecimiento)
+function restoreSafetyBackup(){
+  const b = readSafetyBackup(); if(!b) return;
+  const when = new Date(b.date).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  showConfirm('Se restaurarán los datos tal como estaban el '+when+' ('+b.reason+'). Los datos actuales se guardarán como copia automática por si quieres volver.', 'Restaurar', false).then(ok=>{
+    if(!ok) return;
+    const before = JSON.stringify(DATA);
+    const restored = normalizeData(b.data);
+    saveSafetyBackup('antes de restaurar la copia', DATA);
+    DATA = restored; save(); render();
+    offerUndo('Copia restaurada', summaryText(summarizeData(DATA)), ()=>{ DATA = normalizeData(JSON.parse(before)); });
+  });
 }
 
 /* ======================= KEYBOARD HANDLING (mobile/tablet) ======================= */
@@ -2846,6 +3366,7 @@ window.addEventListener('scroll', function(){
 document.addEventListener('touchmove', e=>{ if(e.touches && e.touches.length>1) e.preventDefault(); }, {passive:false});
 initDownloads();
 render();
+cloudInit();
 
 })();
 </script>
